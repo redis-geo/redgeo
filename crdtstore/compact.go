@@ -19,15 +19,15 @@ type CompactReport struct {
 }
 
 // Compactor performs global-purge compaction (DESIGN §5.5 v1 strategy):
-// confirm the global stability watermark, snapshot live state, rotate all DAGs,
-// purge. It is GATED on the watermark — it refuses unless every expected
-// replica has confirmed a cut.
+// confirm the global stability watermark, then rotate the DAG — snapshot live
+// state into a fresh genesis datastore and drop the old one (with its
+// accumulated tombstones). It is GATED on the watermark and refuses unless
+// every expected replica has confirmed a cut.
 //
-// NOTE: the physical DAG rotation/purge depends on a PurgeDAG primitive that is
-// not yet in the go-ds-crdt fork. Until it lands, Compact verifies the safety
-// gate and snapshots the live state (the correctness-critical half), and
-// reports Performed=false. This keeps the load-bearing watermark logic built
-// and tested early, per §5.5, with the purge wired in when PurgeDAG exists.
+// Rotation is single-node correct via engine.Rotate. In a cluster the gate
+// must hold for ALL replicas and they rotate together in a maintenance window,
+// else an un-rotated replica would merge the fresh genesis with its old DAG and
+// resurrect tombstoned keys (§5.5).
 type Compactor struct {
 	store     *Store
 	watermark *Watermark
@@ -51,7 +51,7 @@ func (c *Compactor) Compact(ctx context.Context) (CompactReport, error) {
 		return CompactReport{}, ErrNotSafeToCompact
 	}
 
-	// Snapshot live state: the set that would seed the fresh genesis DAG.
+	// Count live logical keys (for the report) before rotating.
 	live := 0
 	for db := 0; db < numDBs; db++ {
 		keys, err := (keyRepo{s: c.store, db: db}).listKeys(ctx)
@@ -61,6 +61,10 @@ func (c *Compactor) Compact(ctx context.Context) (CompactReport, error) {
 		live += len(keys)
 	}
 
-	// PurgeDAG rotation goes here once the fork exposes it.
-	return CompactReport{SafeCut: cut, LiveKeys: live, Performed: false}, nil
+	// Rotate the DAG: snapshot live state into a fresh genesis, drop the old
+	// DAG and its tombstones.
+	if _, err := c.store.eng.Rotate(ctx); err != nil {
+		return CompactReport{}, err
+	}
+	return CompactReport{SafeCut: cut, LiveKeys: live, Performed: true}, nil
 }
