@@ -1,0 +1,6 @@
+/redgeo
+/cmd/redgeo/redgeo
+*.test
+*.out
+/data/
+*-pebble-*/
