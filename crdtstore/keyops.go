@@ -55,6 +55,17 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 			}
 		}
 		return s.deleteMeta(ctx, db, key)
+	case core.TypeZSet:
+		scores, err := s.zsetLiveScores(ctx, db, key)
+		if err != nil {
+			return err
+		}
+		for member := range scores {
+			if err := s.writeSlot(ctx, zsetSlot(db, key, member, s.replica()), tagDeleted, nil); err != nil {
+				return err
+			}
+		}
+		return s.deleteMeta(ctx, db, key)
 	default:
 		// Types whose deletion lands in a later phase. Until then no data of
 		// these types exists; tombstone meta so the key reads as absent.
@@ -138,6 +149,17 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 			}
 		}
 		return s.writeMeta(ctx, db, newKey, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeSet}})
+	case core.TypeZSet:
+		scores, err := s.zsetLiveScores(ctx, db, key)
+		if err != nil {
+			return err
+		}
+		for member, sc := range scores {
+			if err := s.writeSlot(ctx, zsetSlot(db, newKey, member, s.replica()), tagPresent, encodeScore(sc)); err != nil {
+				return err
+			}
+		}
+		return s.writeMeta(ctx, db, newKey, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeZSet}})
 	default:
 		return fmt.Errorf("crdtstore: RENAME of type %s not yet supported", k.TypeName())
 	}

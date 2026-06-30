@@ -12,6 +12,7 @@ import (
 	"github.com/redis-geo/redgeo/command/server"
 	"github.com/redis-geo/redgeo/command/set"
 	str "github.com/redis-geo/redgeo/command/string"
+	"github.com/redis-geo/redgeo/command/zset"
 	redis "github.com/redis-geo/redgeo/redisapi"
 )
 
@@ -167,6 +168,42 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return set.ParseSUnion(b)
 	case "sunionstore":
 		return set.ParseSUnionStore(b)
+
+	// sorted set
+	case "zadd":
+		return zset.ParseZAdd(b)
+	case "zscore":
+		return zset.ParseZScore(b)
+	case "zrem":
+		return zset.ParseZRem(b)
+	case "zcard":
+		return zset.ParseZCard(b)
+	case "zcount":
+		return zset.ParseZCount(b)
+	case "zincrby":
+		return zset.ParseZIncrBy(b)
+	case "zrank":
+		return zset.ParseZRank(b, false)
+	case "zrevrank":
+		return zset.ParseZRank(b, true)
+	case "zrange":
+		return zset.ParseZRange(b)
+	case "zrevrange":
+		return zset.ParseZRevRange(b)
+	case "zrangebyscore":
+		return zset.ParseZRangeByScore(b, false)
+	case "zrevrangebyscore":
+		return zset.ParseZRangeByScore(b, true)
+	case "zremrangebyrank":
+		return zset.ParseZRemRangeByRank(b)
+	case "zremrangebyscore":
+		return zset.ParseZRemRangeByScore(b)
+	case "zscan":
+		return zset.ParseZScan(b)
+	case "zunionstore":
+		return zset.ParseZUnionStore(b)
+	case "zinterstore":
+		return zset.ParseZInterStore(b)
 
 	default:
 		return server.ParseUnknown(b)

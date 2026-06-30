@@ -81,5 +81,6 @@ func (s *Store) hashAnyLive(ctx context.Context, db int, key string) (bool, erro
 	return len(items) > 0, err
 }
 func (s *Store) zsetAnyLive(ctx context.Context, db int, key string) (bool, error) {
-	return false, nil // Phase 5
+	scores, err := s.zsetLiveScores(ctx, db, key)
+	return len(scores) > 0, err
 }

@@ -16,7 +16,7 @@ func (s *Store) Redka(db int) redis.Redka {
 		keyRepo{s: s, db: db},  // RKey  — Phase 1
 		hashRepo{s: s, db: db}, // RHash — Phase 2
 		setRepo{s: s, db: db},  // RSet  — Phase 2
-		nil,                    // RZSet — Phase 5
+		zsetRepo{s: s, db: db}, // RZSet — Phase 5
 		nil,                    // RList — Phase 6
 	)
 }
