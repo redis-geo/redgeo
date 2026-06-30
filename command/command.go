@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/redis-geo/redgeo/command/conn"
+	"github.com/redis-geo/redgeo/command/key"
 	"github.com/redis-geo/redgeo/command/server"
+	str "github.com/redis-geo/redgeo/command/string"
 	redis "github.com/redis-geo/redgeo/redisapi"
 )
 
@@ -24,7 +26,7 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 	case "select":
 		return conn.ParseSelect(b)
 
-	// server (storage-orthogonal subset available in Phase 0)
+	// server
 	case "command":
 		return server.ParseOK(b)
 	case "info":
@@ -33,6 +35,46 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return server.ParseOK(b)
 	case "lolwut":
 		return server.ParseLolwut(b)
+	case "dbsize":
+		return server.ParseDBSize(b)
+	case "flushdb":
+		return key.ParseFlushDB(b)
+	case "flushall":
+		return key.ParseFlushDB(b)
+
+	// string
+	case "get":
+		return str.ParseGet(b)
+	case "set":
+		return str.ParseSet(b)
+	case "getset":
+		return str.ParseGetSet(b)
+	case "mget":
+		return str.ParseMGet(b)
+	case "mset":
+		return str.ParseMSet(b)
+	case "strlen":
+		return str.ParseStrlen(b)
+
+	// key
+	case "del":
+		return key.ParseDel(b)
+	case "unlink":
+		return key.ParseDel(b)
+	case "exists":
+		return key.ParseExists(b)
+	case "type":
+		return key.ParseType(b)
+	case "keys":
+		return key.ParseKeys(b)
+	case "scan":
+		return key.ParseScan(b)
+	case "randomkey":
+		return key.ParseRandomKey(b)
+	case "rename":
+		return key.ParseRename(b)
+	case "renamenx":
+		return key.ParseRenameNX(b)
 
 	default:
 		return server.ParseUnknown(b)
