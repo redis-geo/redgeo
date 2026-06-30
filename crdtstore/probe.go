@@ -80,7 +80,8 @@ func (s *Store) counterExists(ctx context.Context, db int, key string) (bool, er
 	return false, nil // Phase 4
 }
 func (s *Store) hashAnyLive(ctx context.Context, db int, key string) (bool, error) {
-	return false, nil // Phase 2
+	items, err := s.hashLiveFields(ctx, db, key)
+	return len(items) > 0, err
 }
 func (s *Store) zsetAnyLive(ctx context.Context, db int, key string) (bool, error) {
 	return false, nil // Phase 5

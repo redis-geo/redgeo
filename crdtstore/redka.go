@@ -12,11 +12,11 @@ import (
 // implemented its slot here is nil and its commands aren't registered.
 func (s *Store) Redka(db int) redis.Redka {
 	return redis.New(
-		strRepo{s: s, db: db}, // RStr  — Phase 1
-		keyRepo{s: s, db: db}, // RKey  — Phase 1
-		nil,                   // RHash — Phase 2
-		nil,                   // RSet  — Phase 2
-		nil,                   // RZSet — Phase 5
-		nil,                   // RList — Phase 6
+		strRepo{s: s, db: db},  // RStr  — Phase 1
+		keyRepo{s: s, db: db},  // RKey  — Phase 1
+		hashRepo{s: s, db: db}, // RHash — Phase 2
+		setRepo{s: s, db: db},  // RSet  — Phase 2
+		nil,                    // RZSet — Phase 5
+		nil,                    // RList — Phase 6
 	)
 }

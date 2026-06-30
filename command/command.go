@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"github.com/redis-geo/redgeo/command/conn"
+	"github.com/redis-geo/redgeo/command/hash"
 	"github.com/redis-geo/redgeo/command/key"
 	"github.com/redis-geo/redgeo/command/server"
+	"github.com/redis-geo/redgeo/command/set"
 	str "github.com/redis-geo/redgeo/command/string"
 	redis "github.com/redis-geo/redgeo/redisapi"
 )
@@ -75,6 +77,64 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return key.ParseRename(b)
 	case "renamenx":
 		return key.ParseRenameNX(b)
+
+	// hash
+	case "hdel":
+		return hash.ParseHDel(b)
+	case "hexists":
+		return hash.ParseHExists(b)
+	case "hget":
+		return hash.ParseHGet(b)
+	case "hgetall":
+		return hash.ParseHGetAll(b)
+	case "hkeys":
+		return hash.ParseHKeys(b)
+	case "hlen":
+		return hash.ParseHLen(b)
+	case "hmget":
+		return hash.ParseHMGet(b)
+	case "hmset":
+		return hash.ParseHMSet(b)
+	case "hscan":
+		return hash.ParseHScan(b)
+	case "hset":
+		return hash.ParseHSet(b)
+	case "hsetnx":
+		return hash.ParseHSetNX(b)
+	case "hvals":
+		return hash.ParseHVals(b)
+
+	// set
+	case "sadd":
+		return set.ParseSAdd(b)
+	case "scard":
+		return set.ParseSCard(b)
+	case "sdiff":
+		return set.ParseSDiff(b)
+	case "sdiffstore":
+		return set.ParseSDiffStore(b)
+	case "sinter":
+		return set.ParseSInter(b)
+	case "sinterstore":
+		return set.ParseSInterStore(b)
+	case "sismember":
+		return set.ParseSIsMember(b)
+	case "smembers":
+		return set.ParseSMembers(b)
+	case "smove":
+		return set.ParseSMove(b)
+	case "spop":
+		return set.ParseSPop(b)
+	case "srandmember":
+		return set.ParseSRandMember(b)
+	case "srem":
+		return set.ParseSRem(b)
+	case "sscan":
+		return set.ParseSScan(b)
+	case "sunion":
+		return set.ParseSUnion(b)
+	case "sunionstore":
+		return set.ParseSUnionStore(b)
 
 	default:
 		return server.ParseUnknown(b)
