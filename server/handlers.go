@@ -77,7 +77,7 @@ func (h *handler) serve(conn redcon.Conn, rcmd redcon.Command) {
 	}
 
 	red := h.store.Redka(st.db)
-	_, _ = pcmd.Run(conn, red)
+	_, _ = pcmd.Run(newRespWriter(conn, st.resp), red)
 }
 
 // ---- MULTI / EXEC / DISCARD (DESIGN §6.10) ----
@@ -118,9 +118,10 @@ func (h *handler) doExec(conn redcon.Conn, st *connState) {
 		return
 	}
 	red := stx.Redka(st.db)
+	w := newRespWriter(conn, st.resp)
 	conn.WriteArray(len(queued))
 	for _, pcmd := range queued {
-		_, _ = pcmd.Run(conn, red)
+		_, _ = pcmd.Run(w, red)
 	}
 	if err := commit(); err != nil {
 		// Replies were already written; log path is the caller's. Best-effort.

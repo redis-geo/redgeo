@@ -40,6 +40,11 @@ type Writer interface {
 	WriteRaw(data []byte)
 	WriteString(str string)
 	WriteUint64(num uint64)
+
+	// RESP3-aware writers (RESP2 fallback when proto < 3, DESIGN §6.11).
+	WriteMap(numPairs int) // RESP3 %N; RESP2 *2N
+	WriteDouble(f float64) // RESP3 ,x; RESP2 bulk string
+	WriteBool(b bool)      // RESP3 #t/#f; RESP2 :1/:0
 }
 
 // Cmd is a Redis-compatible command.

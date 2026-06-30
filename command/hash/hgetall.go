@@ -25,7 +25,8 @@ func (cmd HGetAll) Run(w redis.Writer, red redis.Redka) (any, error) {
 		w.WriteError(cmd.Error(err))
 		return nil, err
 	}
-	w.WriteArray(len(items) * 2)
+	// RESP3 returns a map; RESP2 a flat array (WriteMap handles both).
+	w.WriteMap(len(items))
 	for field, val := range items {
 		w.WriteBulkString(field)
 		w.WriteBulk(val)

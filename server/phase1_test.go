@@ -60,8 +60,23 @@ func readReply(r *bufio.Reader) (reply, error) {
 	}
 	kind, rest := line[0], line[1:]
 	switch kind {
-	case '+', '-', ':':
+	case '+', '-', ':', ',':
+		// simple string / error / integer / RESP3 double
 		return reply{Kind: kind, Str: rest}, nil
+	case '_': // RESP3 null
+		return reply{Kind: '_', Null: true}, nil
+	case '#': // RESP3 boolean
+		return reply{Kind: '#', Str: rest}, nil
+	case '%': // RESP3 map: 2N elements follow
+		n, _ := strconv.Atoi(rest)
+		arr := make([]reply, n*2)
+		for i := 0; i < n*2; i++ {
+			arr[i], err = readReply(r)
+			if err != nil {
+				return reply{}, err
+			}
+		}
+		return reply{Kind: '%', Arr: arr}, nil
 	case '$':
 		n, _ := strconv.Atoi(rest)
 		if n < 0 {

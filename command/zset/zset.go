@@ -85,7 +85,7 @@ func (cmd ZScore) Run(w redis.Writer, red redis.Redka) (any, error) {
 		w.WriteError(cmd.Error(err))
 		return nil, err
 	}
-	redis.WriteFloat(w, score)
+	w.WriteDouble(score)
 	return score, nil
 }
 
@@ -208,7 +208,7 @@ func (cmd ZIncrBy) Run(w redis.Writer, red redis.Redka) (any, error) {
 		w.WriteError(cmd.Error(err))
 		return nil, err
 	}
-	redis.WriteFloat(w, score)
+	w.WriteDouble(score)
 	return score, nil
 }
 

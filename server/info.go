@@ -37,7 +37,9 @@ func (h *handler) doHello(conn redcon.Conn, st *connState, args [][]byte) {
 		{"mode", "standalone"},
 		{"role", "master"},
 	}
-	conn.WriteArray(len(fields) * 2)
+	// RESP3 returns a map; RESP2 a flat array (WriteMap handles both).
+	w := newRespWriter(conn, proto)
+	w.WriteMap(len(fields))
 	for _, kv := range fields {
 		conn.WriteBulkString(kv[0])
 		conn.WriteBulkString(kv[1])
