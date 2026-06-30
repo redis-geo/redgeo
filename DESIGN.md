@@ -6,7 +6,7 @@ An **active/active, geo-distributed, Redis-compatible** server in Go, backed by
 [`redka`](https://github.com/nalgeon/redka) as the blueprint for command
 implementation.
 
-> Working name: **redgeo** (`github.com/redis-geo/redgeo`). Rename freely.
+> Module: **`github.com/redis-geo/redgeo`** (decided).
 
 ---
 
@@ -164,9 +164,12 @@ All keys live under one go-ds-crdt namespace (e.g. `New(store, ds.NewKey("/redge
 Keys are path-like `ds.Key`s; prefix scans are the efficient query primitive, so
 the encoding is designed around **prefix locality**.
 
-Notation: `{db}` = logical DB index (Redis `SELECT`, default 0). `{key}` = the
-Redis key, percent/length-escaped so `/` in user keys can't break the path
-(see §5.4). `{field}`/`{member}` likewise escaped.
+Notation: `{P}` = the **partition bucket** = `bucket(db, key)`, a fixed-width
+hash (e.g. 8-bit → 256 buckets) reserved as the leading path segment for
+compaction (§5.5 / §8). `{db}` = logical DB index (Redis `SELECT`, default 0).
+`{key}` = the Redis key, percent/length-escaped so `/` in user keys can't break
+the path (see §5.4). `{field}`/`{member}` likewise escaped. All sub-keys of one
+logical Redis key share the same `{P}` (it's a pure function of `db`+`key`).
 
 ### 5.1 Layout
 
@@ -180,13 +183,17 @@ tombstones from overwrites).
 
 | Purpose | Key | Value |
 |---|---|---|
-| Key metadata | `/m/{db}/{key}/{replicaID}` | LWW slot: `(hlc, tag, KeyMeta)` (§5.3) |
-| String value | `/d/{db}/{key}/v/{replicaID}` | LWW slot: `(hlc, tag, bytes)` |
-| Counter component | `/d/{db}/{key}/c/{replicaID}` | int64/float64 — single-writer per key |
-| Hash field | `/d/{db}/{key}/h/{field}/{replicaID}` | LWW slot: `(hlc, tag, bytes)` |
-| Set member | `/d/{db}/{key}/e/{member}` | `∅` (presence only) |
-| ZSet member→score | `/d/{db}/{key}/z/{member}/{replicaID}` | LWW slot: `(hlc, tag, score)` |
-| List element | `/d/{db}/{key}/l/{posKey}` | raw bytes (element) |
+| Key metadata | `/{P}/m/{db}/{key}/{replicaID}` | LWW slot: `(hlc, tag, KeyMeta)` (§5.3) |
+| String value | `/{P}/d/{db}/{key}/v/{replicaID}` | LWW slot: `(hlc, tag, bytes)` |
+| Counter component | `/{P}/d/{db}/{key}/c/{replicaID}` | int64/float64 — single-writer per key |
+| Hash field | `/{P}/d/{db}/{key}/h/{field}/{replicaID}` | LWW slot: `(hlc, tag, bytes)` |
+| Set member | `/{P}/d/{db}/{key}/e/{member}` | `∅` (presence only) |
+| ZSet member→score | `/{P}/d/{db}/{key}/z/{member}/{replicaID}` | LWW slot: `(hlc, tag, score)` |
+| List element | `/{P}/d/{db}/{key}/l/{posKey}` | raw bytes (element) |
+
+Every write touching logical key `(db, key)` is also published into the **named
+DAG `p{P}`** (§5.5), so each partition's causal history is independent and can be
+compacted on its own.
 
 `tag ∈ {present, deleted}`. A `deleted` slot with a higher HLC beats an older
 `present` slot, giving intuitive **LWW-with-delete** for registers — unlike sets,
@@ -233,9 +240,57 @@ or hex/base32 so that `/`, control bytes, and empty segments are unambiguous and
 can never collide or break prefix scans. Decision: length-prefixed raw within a
 single path segment using a reversible escape; finalize in `keys.go`.
 
+### 5.5 Partitioning & compaction (decided)
+go-ds-crdt **never GC's** anything: every write/delete is a permanent block in
+the delta-DAG, and deletes leave permanent tombstones. The only reclamation
+primitive is `PurgeDAG(dagName)`, which nukes an **entire** named DAG — heads,
+blocks, set entries, processed markers, *including live data*. So compaction is
+really **DAG rotation**: snapshot the current live key→value state, write it as
+the genesis of a fresh DAG, cut reads/writes over, then `PurgeDAG` the old DAG.
+
+**The hard constraint (applies to any strategy): causal stability.** Tombstones
+are load-bearing — a tombstone is what keeps a deleted key deleted. Purge a
+tombstone while *any* replica still holds the matching add un-synced (lagging or
+partitioned) and anti-entropy will **resurrect the deleted key** on reconnect.
+So before purging you must establish a **stability watermark**: a cut every
+replica has provably synced past. Our HLC slots soften the register case (a
+resurrected stale slot loses on HLC), but set membership and the DAG blocks
+themselves still require the watermark. Building this watermark (track per-
+replica sync progress → derive a safe cut) is a prerequisite for *any*
+compaction and is easy to get subtly wrong — build it early.
+
+**Decision — partition-ready encoding now; global purge v1; rolling named-DAG
+compaction later:**
+
+1. **Reserve `{P}` from day one (cheap insurance).** Keys lead with a partition
+   bucket `{P} = bucket(db, key)`, fixed at **256 buckets** (decided — see §11;
+   `NumWorkers=1` per partition DAG), and each partition's writes go to named
+   DAG `p{P}`. This costs nothing now and avoids a full key-rewrite when we turn
+   on partitioned compaction. Bucket count is effectively immutable once data
+   exists, so it was picked up front (idle cost of 256 DAGs measured — §11).
+2. **v1 = scheduled global purge.** Simplest correct option: in a maintenance
+   window, confirm the global stability watermark, snapshot live state, rotate
+   all DAGs, purge. Fine while the dataset is small; preserves cross-key
+   atomicity. Downside: cluster-wide write stall, cost grows with data size.
+3. **Target = rolling per-partition rotation.** Compact one `p{P}` at a time:
+   only that partition's keys quiesce briefly, the rest of the keyspace keeps
+   serving, storage stays bounded continuously, and a botched rotation damages
+   one partition not the whole store. Same rotate-and-purge primitive, scoped
+   per DAG, gated on a per-partition watermark.
+
+Trade-offs (full comparison): partitioning costs more machinery (partition
+router, per-partition watermarks, and cross-partition `MULTI`/`RENAME`/`*STORE`
+lose single-DAG atomicity) and risks hot-bucket skew, but it's the only option
+compatible with always-on geo at scale. Global purge is simpler and keeps
+atomicity but stalls the whole cluster and doesn't scale with dataset size — so
+it's the v1 stepping-stone, not the destination.
+
 ---
 
 ## 6. Per-feature CRDT design & semantics
+
+> Key paths below omit the leading `/{P}/` partition segment (§5.5) for brevity;
+> every key is implicitly under its partition bucket and published to DAG `p{P}`.
 
 ### 6.1 Strings (Tier 1 — HLC-LWW register, correct)
 - `SET k v` → write the local LWW slot `/d/{db}/{key}/v/{R}` + meta(type=str).
@@ -370,10 +425,24 @@ per-replica components** (§6.4).
 
 ### 6.9 Keys / generic (Tier 1, with scan caveats)
 - `DEL`/`UNLINK`/`EXISTS`/`TYPE`/`RANDOMKEY`/`RENAME`/`RENAMENX`/`PERSIST`.
-- `KEYS pattern` / `SCAN cursor [MATCH] [COUNT]`: prefix-scan `/m/{db}/`; cursor
-  is an **opaque last-key** (not Redis's reverse-binary-iteration cursor, but
-  compatible contract: resumable, eventually complete). `MATCH` applied in app,
-  `COUNT` is a hint. Ordering is naive — fine for scan.
+- `KEYS pattern` / `SCAN cursor [MATCH] [COUNT]`: meta keys live under
+  `/{P}/m/{db}/`, so a db-wide scan iterates all `{P}` buckets (256 prefix scans,
+  or one full scan filtered by `db`). `MATCH` applied in app, `COUNT` is a hint.
+  Ordering is naive — fine for scan.
+- **Cursor = numeric handle + per-node resume table (decided).** The wire cursor
+  is a **decimal `uint64` string** (with `0` = start *and* end sentinel), because
+  major clients parse it numerically — go-redis (`strconv.ParseUint`), redis-py
+  (`int(cursor)`) — so a raw opaque blob would break them. On `SCAN 0` the node
+  allocates a non-zero `uint64` token, scans from the start, fills `COUNT`, and
+  stores the resume position `(P, last-key-within-P)` in an in-memory,
+  idle-TTL'd map keyed by the token; subsequent `SCAN <token>` resumes exactly
+  from `(P, last-key)`. Exact last-key resume gives Redis's guarantee (a key
+  present for the whole scan is returned ≥1×) and is robust to concurrent
+  mutation. The resume table is **per node**, shared across that node's
+  connections (clients pin a pool to one endpoint, so this matches how Redis
+  cursors are used). A cursor presented to a *different* node (rare mid-scan
+  failover) doesn't resolve → return an error / restart; document. `HSCAN`/
+  `SSCAN`/`ZSCAN` use the same mechanism scoped to one key's element prefix.
 - `RENAME` = copy element keys under new name + tombstone old (non-atomic across
   replicas; batched locally).
 - `DEL` of a collection = tombstone meta + every element key (one `Batch`).
@@ -430,14 +499,44 @@ hash) for parallel head processing. v1 = single DAG.
 Anti-entropy (rebroadcast + DAG repair) is built in; new/partitioned nodes catch
 up automatically. We must call `Sync()` appropriately given Pebble is async.
 
+### 7.1 Consuming the go-ds-crdt fork
+**Decision: depend on the `redis-geo` fork of go-ds-crdt**, not upstream
+`ipfs/go-ds-crdt`. This lets us patch the storage layer for redgeo's needs
+(e.g. compaction hooks, custom `Delta`/`MerkleCRDT` factories, named-DAG
+partitioning) without waiting on upstream.
+
+Important wrinkle: the fork's repo is `github.com/redis-geo/go-ds-crdt` **but its
+`go.mod` still declares `module github.com/ipfs/go-ds-crdt`**. So we keep
+importing it under the canonical path and redirect with a `replace` in redgeo's
+`go.mod`:
+
+```go.mod
+require github.com/ipfs/go-ds-crdt v0.6.8
+
+// Local development (everything is under GOPATH/src here):
+replace github.com/ipfs/go-ds-crdt => ../go-ds-crdt
+
+// Reproducible / CI builds — pin to a fork commit instead:
+// replace github.com/ipfs/go-ds-crdt => github.com/redis-geo/go-ds-crdt <commit-or-tag>
+```
+
+Code imports stay `import "github.com/ipfs/go-ds-crdt"` unchanged; only the
+`replace` selects the fork. If we later diverge enough to want our own import
+path, we'd rename the module in the fork (`module github.com/redis-geo/go-ds-crdt`)
+and drop the `replace` — but that also means rewriting the fork's internal
+imports, so we defer it. Decision: **`replace` to the fork; local path for dev,
+pinned fork commit for CI.** The fork should be tagged so CI builds are
+reproducible.
+
 ---
 
 ## 8. Hard problems / risks (tracked explicitly)
 
-1. **Tombstone growth.** Deletes/expiry grow the DAG forever. Need a compaction
-   strategy; `PurgeDAG` requires quiescence on that DAG. Mitigation: partition
-   churny keyspaces into named DAGs that can be purged independently; schedule
-   compaction windows. **Open.**
+1. **Tombstone / DAG growth.** Deletes/expiry/overwrites grow the store forever;
+   `PurgeDAG` is the only reclamation and it rotates an entire DAG. **Resolved
+   strategy (§5.5):** partition-ready `{P}` encoding now → global purge in v1 →
+   rolling per-partition DAG rotation later, all gated on a **causal-stability
+   watermark** (the genuinely tricky sub-component — build & test it early).
 2. **Counter/string duality** — resolved: counters and strings are distinct
    flavors and may not mix (§6.4), so this is no longer a correctness risk, only
    a documented Redis deviation.
@@ -468,7 +567,7 @@ up automatically. We must call `Sync()` appropriately given Pebble is async.
 | **6. Lists** | Fractional-index sequence. | LPUSH/RPUSH/LPOP/RPOP/LRANGE/LINDEX/LLEN/LSET/LREM/LINSERT/LTRIM/RPOPLPUSH |
 | **7. MULTI + pub/sub** | Batch-backed MULTI/EXEC/DISCARD; local pub/sub. | MULTI/EXEC/DISCARD; (P)SUBSCRIBE/PUBLISH |
 | **8. Replication** | libp2p mesh, multi-node, convergence + partition/heal tests. | engine hardening, anti-entropy validation |
-| **9. Hardening** | Compaction/GC, RESP3/HELLO, metrics, geo pub/sub. | ops & polish |
+| **9. Hardening** | Causal-stability watermark + global-purge compaction (rolling per-partition rotation deferred), RESP3/HELLO, metrics, geo pub/sub. | ops & polish |
 
 ### Testing strategy
 - **Unit:** per-command behavior against a single in-mem engine (reuse redka's
@@ -498,9 +597,44 @@ up automatically. We must call `Sync()` appropriately given Pebble is async.
 - MULTI via **go-ds-crdt Batch** (atomic propagation, no isolation/rollback);
   no WATCH.
 - Backing store **Pebble**; replication via **libp2p + IPFS-Lite + gossipsub**.
+- **Consume go-ds-crdt via the `redis-geo` fork**, not upstream (§7.1). *(decided)*
+- **Compaction:** partition-ready `{P}` key encoding now → **global purge v1** →
+  **rolling per-partition named-DAG rotation** later, gated on a causal-stability
+  watermark (§5.5). *(decided)*
+- **Module path** `github.com/redis-geo/redgeo`. *(decided)*
+- **SCAN cursor:** numeric `uint64` wire cursor backed by a per-node TTL'd
+  resume table mapping token → `(P, last-key)` (§6.9). *(decided)*
 
 ## 11. Open decisions (still need a call before/while building)
-1. **Compaction strategy** — named-DAG partitioning vs. scheduled global purge.
-2. **SCAN cursor** — opaque-last-key contract acceptable for target clients?
-3. **Module path / project name** and whether to vendor go-ds-crdt via the
-   `redis-geo` fork or track upstream `ipfs/go-ds-crdt`.
+
+*(none currently — partition bucket count resolved below)*
+
+### Resolved — partition bucket count = 256 (2026-06-30, measured)
+
+Locked at **256 buckets, `NumWorkers = 1` per partition DAG.** Effectively
+immutable once data exists (changing it rehashes every key to a different
+partition), so it was settled before any code lands.
+
+Decision was gated on the idle per-DAG cost of running 256 named DAGs (one
+`crdt.Datastore` per partition) on a node. Probe (`dagprobe/`, shared backing
+store, no-op broadcaster, idle hold) measured:
+
+- **Goroutines:** 6/DAG at `NumWorkers=1` (10/DAG at the default 5). 256
+  partitions = ~1536 parked goroutines — cheap; the runtime handles it fine.
+- **Heap (unpatched go-ds-crdt):** ~2.0 MiB/DAG → **~500 MiB** for 256 idle
+  partitions. That was the only real obstacle to 256.
+- **Root cause:** ~99% of that heap is a hardcoded `make(chan
+  broadcastBatchHead, 32000)` (~2 MiB) allocated per `Datastore`,
+  **unconditionally** — but only ever read/written when `BroadcastBatchDelay >
+  0` (off by default). Under redgeo's default config it is allocated-but-never-
+  touched dead weight.
+- **Fix landed in the redis-geo fork:** allocate that channel only when
+  `BroadcastBatchDelay > 0`. Full go-ds-crdt suite + batching test pass.
+  Post-patch idle cost: **~6.6 KiB/DAG → ~1.6 MiB total** for 256 partitions.
+
+Net: with the fork patch, 256 partitions cost ~1.6 MiB + ~1536 goroutines idle
+per node — negligible — so the rolling-rotation granularity argument wins and
+there's no reason to drop to 128/64. **This decision depends on the fork
+carrying the `broadcastBatchCh` patch** (or `BroadcastBatchDelay` staying 0);
+if redgeo ever enables broadcast batching, revisit the channel size, since each
+partition would then allocate the full buffer again.
