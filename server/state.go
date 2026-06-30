@@ -14,6 +14,7 @@ const NumDBs = 16
 type connState struct {
 	db      int
 	inMulti bool
+	aborted bool // a queued command failed to parse; EXEC must abort
 	cmds    []redis.Cmd
 }
 
