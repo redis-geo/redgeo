@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,12 +24,10 @@ func main() {
 	addr := flag.String("addr", ":6380", "RESP listen address")
 	dataDir := flag.String("data", "", "data directory (empty = in-memory, ephemeral)")
 	replicaID := flag.String("replica", "", "stable replica ID (empty = derive/persist one)")
+	p2p := flag.Bool("p2p", false, "enable libp2p replication mesh (multi-node)")
+	p2pListen := flag.String("p2p-listen", "/ip4/0.0.0.0/tcp/0", "libp2p listen multiaddr")
+	bootstraps := flag.String("bootstrap", "", "comma-separated bootstrap peer multiaddrs")
 	flag.Parse()
-
-	rid, err := resolveReplicaID(*replicaID, *dataDir)
-	if err != nil {
-		log.Fatalf("replica id: %v", err)
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -37,11 +36,49 @@ func main() {
 	if *dataDir != "" {
 		pebbleDir = filepath.Join(*dataDir, "pebble")
 	}
-	eng, err := engine.New(ctx, engine.Config{PebbleDir: pebbleDir, ReplicaID: rid})
+
+	cfg := engine.Config{PebbleDir: pebbleDir}
+
+	// Multi-node mode: stand up the libp2p mesh and derive the replica ID from
+	// the peer identity (DESIGN §7, §8).
+	if *p2p {
+		keyPath := ""
+		if *dataDir != "" {
+			keyPath = filepath.Join(*dataDir, "p2p.key")
+			_ = os.MkdirAll(*dataDir, 0o700)
+		}
+		var boots []string
+		if *bootstraps != "" {
+			boots = strings.Split(*bootstraps, ",")
+		}
+		cl, err := engine.NewCluster(ctx, engine.ClusterConfig{
+			ListenAddrs: []string{*p2pListen},
+			KeyPath:     keyPath,
+			Bootstraps:  boots,
+		})
+		if err != nil {
+			log.Fatalf("cluster: %v", err)
+		}
+		defer cl.Close()
+		cfg.Broadcaster = cl.Broadcaster
+		cfg.DAGService = cl.DAGService
+		cfg.RebroadcastInterval = 5 * time.Second
+		cfg.ReplicaID = cl.ReplicaID
+		log.Printf("libp2p replication enabled (peer %s)", cl.ReplicaID)
+	} else {
+		rid, err := resolveReplicaID(*replicaID, *dataDir)
+		if err != nil {
+			log.Fatalf("replica id: %v", err)
+		}
+		cfg.ReplicaID = rid
+	}
+
+	eng, err := engine.New(ctx, cfg)
 	if err != nil {
 		log.Fatalf("engine: %v", err)
 	}
 	defer eng.Close()
+	rid := cfg.ReplicaID
 
 	store := crdtstore.NewStore(eng)
 

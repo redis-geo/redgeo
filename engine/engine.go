@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	bsrv "github.com/ipfs/boxo/blockservice"
 	blockstore "github.com/ipfs/boxo/blockstore"
@@ -22,6 +23,7 @@ import (
 	dssync "github.com/ipfs/go-datastore/sync"
 	crdt "github.com/ipfs/go-ds-crdt"
 	pebbleds "github.com/ipfs/go-ds-pebble"
+	ipld "github.com/ipfs/go-ipld-format"
 	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/redis-geo/redgeo/hlc"
@@ -42,6 +44,18 @@ type Config struct {
 	// drive keyspace notifications and local indexes. Optional.
 	PutHook    func(k ds.Key, v []byte)
 	DeleteHook func(k ds.Key)
+	// Broadcaster propagates deltas to peer replicas. nil = single-node no-op.
+	// In-process clusters use a memory network (NewMemNetwork); production uses
+	// the libp2p gossipsub broadcaster (NewCluster).
+	Broadcaster crdt.Broadcaster
+	// DAGService exchanges DAG blocks with peers. nil = a local offline service
+	// (single node). In-process clusters share one service so blocks written by
+	// any replica are visible to all (simulating perfect block exchange).
+	DAGService ipld.DAGService
+	// RebroadcastInterval controls how often heads are re-published for
+	// anti-entropy (lagging/healed replicas catch up). 0 = go-ds-crdt's default
+	// (1m). Lower it for faster convergence after a partition heals.
+	RebroadcastInterval time.Duration
 }
 
 // Engine is the storage substrate handed to the crdtstore backend.
@@ -86,15 +100,29 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		backing = pb
 	}
 
-	// Local offline DAG service (no network block exchange in Phase 0).
-	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
-	dagSvc := merkledag.NewDAGService(bsrv.New(bs, offline.Exchange(bs)))
+	// DAG service: injected (shared cluster service) or a local offline one.
+	dagSvc := cfg.DAGService
+	if dagSvc == nil {
+		bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
+		dagSvc = merkledag.NewDAGService(bsrv.New(bs, offline.Exchange(bs)))
+	}
+
+	// Broadcaster: injected (cluster) or a single-node no-op.
+	var bcast crdt.Broadcaster = noopBroadcaster{ctx: ctx}
+	if cfg.Broadcaster != nil {
+		bcast = cfg.Broadcaster
+	}
 
 	opts := crdt.DefaultOptions()
 	opts.Logger = logging.Logger("redgeo/crdt")
 	opts.NumWorkers = 1 // DESIGN §11: low per-partition worker count
+	opts.PutHook = cfg.PutHook
+	opts.DeleteHook = cfg.DeleteHook
+	if cfg.RebroadcastInterval > 0 {
+		opts.RebroadcastInterval = cfg.RebroadcastInterval
+	}
 
-	store, err := crdt.New(backing, Namespace, dagSvc, noopBroadcaster{ctx: ctx}, opts)
+	store, err := crdt.New(backing, Namespace, dagSvc, bcast, opts)
 	if err != nil {
 		if c, ok := backing.(interface{ Close() error }); ok {
 			_ = c.Close()
