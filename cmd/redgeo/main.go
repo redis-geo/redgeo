@@ -27,6 +27,7 @@ func main() {
 	p2p := flag.Bool("p2p", false, "enable libp2p replication mesh (multi-node)")
 	p2pListen := flag.String("p2p-listen", "/ip4/0.0.0.0/tcp/0", "libp2p listen multiaddr")
 	bootstraps := flag.String("bootstrap", "", "comma-separated bootstrap peer multiaddrs")
+	partitions := flag.Int("partitions", 1, "number of named partition DAGs (multi-node; 256 = one per bucket)")
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -60,11 +61,16 @@ func main() {
 			log.Fatalf("cluster: %v", err)
 		}
 		defer cl.Close()
-		cfg.Broadcaster = cl.Broadcaster
 		cfg.DAGService = cl.DAGService
 		cfg.RebroadcastInterval = 5 * time.Second
 		cfg.ReplicaID = cl.ReplicaID
-		log.Printf("libp2p replication enabled (peer %s)", cl.ReplicaID)
+		cfg.NumPartitions = *partitions
+		if *partitions > 1 {
+			cfg.BroadcasterFactory = cl.BroadcasterFactory
+		} else {
+			cfg.Broadcaster = cl.Broadcaster
+		}
+		log.Printf("libp2p replication enabled (peer %s, %d partition DAGs)", cl.ReplicaID, *partitions)
 	} else {
 		rid, err := resolveReplicaID(*replicaID, *dataDir)
 		if err != nil {

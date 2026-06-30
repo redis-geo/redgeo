@@ -32,13 +32,17 @@ type ClusterConfig struct {
 	Bootstraps []string
 }
 
-// Cluster is a live libp2p replication mesh: a Broadcaster + DAGService to feed
-// into engine.Config, plus the peer identity and a Close.
+// Cluster is a live libp2p replication mesh: a Broadcaster (single-DAG) or
+// BroadcasterFactory (per-partition topics) + DAGService to feed into
+// engine.Config, plus the peer identity and a Close.
 type Cluster struct {
 	Broadcaster crdt.Broadcaster
-	DAGService  ipld.DAGService
-	ReplicaID   string // libp2p peer ID
-	closers     []func() error
+	// BroadcasterFactory joins a distinct gossipsub topic per partition so each
+	// named partition DAG gossips independently (DESIGN §5.5).
+	BroadcasterFactory func(p int) crdt.Broadcaster
+	DAGService         ipld.DAGService
+	ReplicaID          string // libp2p peer ID
+	closers            []func() error
 }
 
 // NewCluster builds the libp2p host, DHT, gossipsub, IPFS-Lite DAG service, and
@@ -106,11 +110,24 @@ func NewCluster(ctx context.Context, cfg ClusterConfig) (*Cluster, error) {
 		return nil, fmt.Errorf("cluster: broadcaster: %w", err)
 	}
 
+	// Per-partition broadcaster: one gossipsub topic per partition DAG. Joins
+	// lazily; a failed join falls back to a no-op so a single bad topic doesn't
+	// take the node down.
+	factory := func(p int) crdt.Broadcaster {
+		topic := fmt.Sprintf("%s/p%02x", dataTopic, p)
+		b, jerr := crdt.NewPubSubBroadcaster(ctx, psub, topic)
+		if jerr != nil {
+			return noopBroadcaster{ctx: ctx}
+		}
+		return b
+	}
+
 	return &Cluster{
-		Broadcaster: bcast,
-		DAGService:  lite,
-		ReplicaID:   pid.String(),
-		closers:     []func() error{dht.Close, h.Close},
+		Broadcaster:        bcast,
+		BroadcasterFactory: factory,
+		DAGService:         lite,
+		ReplicaID:          pid.String(),
+		closers:            []func() error{dht.Close, h.Close},
 	}, nil
 }
 
