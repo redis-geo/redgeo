@@ -23,12 +23,20 @@ const lockShards = 1024
 type Store struct {
 	eng     *engine.Engine
 	locks   *lockManager
-	listSeq uint64 // monotonic tiebreaker for list element positions (§6.5)
+	listSeq uint64       // monotonic tiebreaker for list element positions (§6.5)
+	resume  *resumeTable // SCAN cursor resume table (§6.9)
 }
+
+// scanCursorTTLMS is the idle TTL for SCAN cursor resume entries.
+const scanCursorTTLMS = 60_000
 
 // NewStore builds a Store over an engine.
 func NewStore(eng *engine.Engine) *Store {
-	return &Store{eng: eng, locks: newLockManager(lockShards)}
+	return &Store{
+		eng:    eng,
+		locks:  newLockManager(lockShards),
+		resume: newResumeTable(scanCursorTTLMS),
+	}
 }
 
 // replica is this node's slot-owner identity.

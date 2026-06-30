@@ -201,32 +201,54 @@ func (r keyRepo) Random() (core.Key, error) {
 }
 
 // Scan returns all matching keys in one page (cursor 0). Pagination via the
-// resumable numeric cursor (DESIGN §6.9) is a Phase 9 refinement; returning
-// every key in one call is a valid SCAN per Redis semantics.
+// numeric uint64 wire cursor backed by the per-node resume table mapping
+// token → (partition, last-key) (DESIGN §6.9). Cursor 0 starts a scan and
+// marks its end. A stale/foreign cursor (e.g. presented to a different node)
+// restarts from the beginning.
 func (r keyRepo) Scan(cursor int, pattern string, ktype core.TypeID, count int) (restypes.KeyScanResult, error) {
 	ctx := bg()
-	names, err := r.listKeys(ctx)
+	if count <= 0 {
+		count = defaultScanCount
+	}
+	startP, last := 0, ""
+	if cursor != 0 {
+		if e, ok := r.s.resume.get(uint64(cursor)); ok && e.scopeKey == "" {
+			startP, last = e.partition, e.last
+		}
+	}
+
+	found := make(map[string]core.Key)
+	keep := func(name string) (bool, error) {
+		if pattern != "" && pattern != "*" && !match.Match(name, pattern) {
+			return false, nil
+		}
+		k, ok, err := r.s.probe(ctx, r.db, name)
+		if err != nil || !ok {
+			return false, err
+		}
+		if ktype != core.TypeAny && k.Type != ktype {
+			return false, nil
+		}
+		found[name] = k
+		return true, nil
+	}
+
+	names, nextP, nextLast, done, err := r.scanKeys(startP, last, count, keep)
 	if err != nil {
 		return restypes.KeyScanResult{}, err
 	}
-	var keys []core.Key
+	keys := make([]core.Key, 0, len(names))
 	for _, name := range names {
-		if pattern != "" && pattern != "*" && !match.Match(name, pattern) {
-			continue
-		}
-		k, ok, err := r.s.probe(ctx, r.db, name)
-		if err != nil {
-			return restypes.KeyScanResult{}, err
-		}
-		if !ok {
-			continue
-		}
-		if ktype != core.TypeAny && k.Type != ktype {
-			continue
-		}
-		keys = append(keys, k)
+		keys = append(keys, found[name])
 	}
-	return restypes.KeyScanResult{Cursor: 0, Keys: keys}, nil
+	if done {
+		if cursor != 0 {
+			r.s.resume.free(uint64(cursor))
+		}
+		return restypes.KeyScanResult{Cursor: 0, Keys: keys}, nil
+	}
+	tok := r.s.resume.alloc(&resumeEntry{db: r.db, partition: nextP, last: nextLast})
+	return restypes.KeyScanResult{Cursor: int(tok), Keys: keys}, nil
 }
 
 // Rename copies the key's data to newKey and deletes the old (DESIGN §6.9:
