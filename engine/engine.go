@@ -192,6 +192,19 @@ func (e *Engine) Sync(ctx context.Context, prefix ds.Key) error {
 	return e.crdt.Sync(ctx, prefix)
 }
 
+// Stats reports CRDT replication internals for INFO (DESIGN §6.11).
+type Stats struct {
+	Heads      int
+	MaxHeight  uint64
+	QueuedJobs int
+}
+
+// Stats returns current replication statistics.
+func (e *Engine) Stats(ctx context.Context) Stats {
+	s := e.crdt.InternalStats(ctx)
+	return Stats{Heads: len(s.Heads), MaxHeight: s.MaxHeight, QueuedJobs: s.QueuedJobs}
+}
+
 // Close shuts down the CRDT datastore and backing store.
 func (e *Engine) Close() error {
 	err := e.crdt.Close()

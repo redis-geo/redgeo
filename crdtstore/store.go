@@ -34,6 +34,18 @@ func NewStore(eng *engine.Engine) *Store {
 // replica is this node's slot-owner identity.
 func (s *Store) replica() string { return s.eng.Replica() }
 
+// ReplicaID returns this node's replica identity (for INFO/HELLO).
+func (s *Store) ReplicaID() string { return s.eng.Replica() }
+
+// EngineStats returns CRDT replication statistics (for INFO).
+func (s *Store) EngineStats(ctx context.Context) engine.Stats { return s.eng.Stats(ctx) }
+
+// DBSize returns the number of live keys in a logical DB (for INFO keyspace).
+func (s *Store) DBSize(ctx context.Context, db int) (int, error) {
+	keys, err := (keyRepo{s: s, db: db}).listKeys(ctx)
+	return len(keys), err
+}
+
 // stamp issues the next local HLC stamp.
 func (s *Store) stamp() hlc.Stamp { return s.eng.Clock().Now() }
 

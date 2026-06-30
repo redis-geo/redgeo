@@ -13,6 +13,7 @@ const NumDBs = 16
 // selected database, and (from Phase 7) the MULTI transaction queue.
 type connState struct {
 	db      int
+	resp    int // negotiated RESP protocol version (2 or 3); 0 = default (2)
 	inMulti bool
 	aborted bool // a queued command failed to parse; EXEC must abort
 	cmds    []redis.Cmd

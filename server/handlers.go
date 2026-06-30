@@ -51,6 +51,12 @@ func (h *handler) serve(conn redcon.Conn, rcmd redcon.Command) {
 	case "publish":
 		h.doPublish(conn, rcmd.Args)
 		return
+	case "hello":
+		h.doHello(conn, st, rcmd.Args)
+		return
+	case "info":
+		h.doInfo(conn)
+		return
 	}
 
 	pcmd, err := command.Parse(rcmd.Args)
