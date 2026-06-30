@@ -638,3 +638,86 @@ there's no reason to drop to 128/64. **This decision depends on the fork
 carrying the `broadcastBatchCh` patch** (or `BroadcastBatchDelay` staying 0);
 if redgeo ever enables broadcast batching, revisit the channel size, since each
 partition would then allocate the full buffer again.
+
+---
+
+## 12. Implementation status & residual limitations
+
+**Status (2026-06-30):** phases 0–9 of §9 are implemented, plus all six items
+that were initially deferred (hash-field PN-counters, resumable SCAN cursor,
+Batch-backed MULTI, RESP3 scalar types, global-purge compaction, per-partition
+named DAGs). Build + vet + tests are green; the binary is exercised end-to-end
+over RESP. The packages are `core`, `parser`, `redisapi`, `restypes`, `hlc`,
+`engine`, `crdtstore`, `command/*`, `server`, `cmd/redgeo`.
+
+The items below are **residual limitations** — deliberate trade-offs or
+honestly-incomplete edges that remain after that work. They are documented here
+so they are not mistaken for bugs or for "done."
+
+### 12.1 Cross-partition `MULTI`/`EXEC` is not atomic across partitions
+`EXEC` commits its queued writes through one batch with a read-your-writes
+overlay (§6.10). With per-partition named DAGs (§5.5), that batch fans out to a
+sub-batch **per partition** — atomic *within* each partition's DAG, but **not**
+across partitions: a transaction touching keys in two partitions lands as two
+deltas. This is the cross-partition atomicity loss already called out in §5.5;
+single-DAG deployments (`NumPartitions <= 1`) keep full per-transaction
+atomicity. `MULTI` also has no isolation or rollback (Redis-compatible).
+
+### 12.2 Compaction: single-node automated; cluster rotation is operational
+`engine.RotatePartition` / `Rotate` implement global-purge compaction by DAG
+rotation (snapshot live → fresh genesis namespace → purge old), gated on the
+causal-stability watermark (§5.5). **Only single-node rotation is automated and
+tested.** In a cluster, all replicas must rotate a partition **together** in a
+maintenance window, or an un-rotated peer merges the fresh genesis with its old
+DAG and resurrects tombstoned keys — that coordination is an operational
+procedure, not yet automated. The watermark itself is a **min-of-high-water
+approximation**: it refuses to cut until every expected replica is observed
+(safe), but a fully precise cut needs a per-pair sync matrix (§5.5). Rolling
+per-partition rotation (the §5.5 "target") is built; cluster orchestration of it
+is the remaining work.
+
+### 12.3 `HSCAN`/`SSCAN`/`ZSCAN` return a single page
+The keyspace `SCAN` has a real resumable numeric cursor backed by a per-node
+`(partition, last-key)` resume table (§6.9). The collection scans return all
+elements of one key in a single page (cursor `0`). This is valid Redis SCAN
+behavior for a bounded single key, but large collections are not paginated.
+
+### 12.4 RESP3 is partial: scalar types yes, push frames no
+HELLO negotiates RESP2/RESP3 and the type-distinct **scalar** replies are
+emitted correctly under proto 3 (map, double, null, boolean — §6.11). redcon
+speaks RESP2 on the wire, so RESP3 is produced via raw encoding; **push-type
+frames are not implemented** — pub/sub messages (§6.12) are still delivered as
+RESP2-shaped arrays, so true RESP3 push (out-of-band messages on the same
+connection) is unavailable.
+
+### 12.5 Pub/sub is local-only
+`(P)SUBSCRIBE`/`PUBLISH` work within a single node via redcon's built-in PubSub
+(§6.12). **Geo pub/sub** — propagating messages across replicas over a dedicated
+gossipsub topic — is not wired; a publish on one node is not seen by subscribers
+on another.
+
+### 12.6 go-ds-crdt fork dependency is not merged/pinned
+redgeo consumes the **redis-geo fork** of go-ds-crdt via a `replace` to a local
+path (`../go-ds-crdt`) for development (§7.1). The 256-partition viability
+depends on the fork's lazy-`broadcastBatchCh` patch (§11), which lives on the
+fork branch `lazy-broadcast-batch-ch` and is **not merged to the fork's
+`master`**. A fresh clone won't build until the fork is checked out as a sibling
+**or** the `replace` is repinned to a fork commit (the §7.1 "CI" form). This must
+be resolved before any reproducible/CI build.
+
+### 12.7 Hash-field counter numeric type is float-backed
+Hash-field PN-counter components are stored as decimal `float64` and summed as
+float (§6.4), formatting integer-valued totals without a decimal point. A
+`HINCRBY` performed after a `HINCRBYFLOAT` on the same field can therefore
+truncate/observe float rounding rather than erroring as Redis would. String
+counters keep distinct int/float flavors and don't have this edge.
+
+### 12.8 Smaller documented edges (unchanged from earlier sections)
+- **NX/XX/SETNX and `ZADD GT/LT/NX/XX`** existence checks are node-local only —
+  concurrent cross-replica NX can both succeed (§6.1, §6.6).
+- **List index ops** (`LSET i`, positional pops, `LTRIM`) race before
+  convergence; lists are the weakest type (§6.5).
+- **`len`/`DBSIZE`/`SCAN`** counts come from O(n) scans (§8.3).
+- **Rotation broadcaster reuse:** during a partition's rotation swap the old and
+  new datastore briefly share the same broadcaster; harmless for single-node /
+  coordinated rotation, noted for the cluster-orchestration work (§12.2).
