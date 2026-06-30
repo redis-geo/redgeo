@@ -21,8 +21,9 @@ const lockShards = 1024
 // constructed once per node; per-connection database selection is bound by
 // Redka(db), which returns repos scoped to a logical DB (DESIGN §6.11).
 type Store struct {
-	eng   *engine.Engine
-	locks *lockManager
+	eng     *engine.Engine
+	locks   *lockManager
+	listSeq uint64 // monotonic tiebreaker for list element positions (§6.5)
 }
 
 // NewStore builds a Store over an engine.

@@ -9,6 +9,7 @@ import (
 	"github.com/redis-geo/redgeo/command/conn"
 	"github.com/redis-geo/redgeo/command/hash"
 	"github.com/redis-geo/redgeo/command/key"
+	"github.com/redis-geo/redgeo/command/list"
 	"github.com/redis-geo/redgeo/command/server"
 	"github.com/redis-geo/redgeo/command/set"
 	str "github.com/redis-geo/redgeo/command/string"
@@ -168,6 +169,32 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return set.ParseSUnion(b)
 	case "sunionstore":
 		return set.ParseSUnionStore(b)
+
+	// list
+	case "lpush":
+		return list.ParseLPush(b)
+	case "rpush":
+		return list.ParseRPush(b)
+	case "lpop":
+		return list.ParseLPop(b)
+	case "rpop":
+		return list.ParseRPop(b)
+	case "llen":
+		return list.ParseLLen(b)
+	case "lindex":
+		return list.ParseLIndex(b)
+	case "lrange":
+		return list.ParseLRange(b)
+	case "lset":
+		return list.ParseLSet(b)
+	case "lrem":
+		return list.ParseLRem(b)
+	case "linsert":
+		return list.ParseLInsert(b)
+	case "ltrim":
+		return list.ParseLTrim(b)
+	case "rpoplpush":
+		return list.ParseRPopLPush(b)
 
 	// sorted set
 	case "zadd":

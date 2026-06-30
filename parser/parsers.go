@@ -34,7 +34,9 @@ func Enum(dest *string, allowed ...string) ParserFunc {
 		if len(args) == 0 {
 			return false, args, nil
 		}
-		val := string(args[0])
+		// Redis keyword arguments are case-insensitive; the allowed set is
+		// lowercase, so normalize before matching.
+		val := strings.ToLower(string(args[0]))
 		if !slices.Contains(allowed, val) {
 			return true, args, ErrSyntaxError
 		}
