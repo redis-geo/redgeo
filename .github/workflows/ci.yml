@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # redgeo's go.mod `replace`s point at two sibling forks (DEV.md "Fork
+      # dependencies"). Lay the workspace out so those local paths resolve:
+      #   $GITHUB_WORKSPACE/redgeo        -> this repo
+      #   $GITHUB_WORKSPACE/go-ds-crdt    -> ../go-ds-crdt  (fork)
+      #   $GITHUB_WORKSPACE/redcon        -> ../redcon      (fork)
+      - name: Check out redgeo
+        uses: actions/checkout@v4
+        with:
+          path: redgeo
+
+      - name: Check out go-ds-crdt fork
+        uses: actions/checkout@v4
+        with:
+          repository: redis-geo/go-ds-crdt
+          ref: lazy-broadcast-batch-ch
+          path: go-ds-crdt
+
+      - name: Check out redcon fork
+        uses: actions/checkout@v4
+        with:
+          repository: redis-geo/redcon
+          ref: resp3
+          path: redcon
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: redgeo/go.mod
+          cache-dependency-path: redgeo/go.sum
+
+      - name: gofmt
+        working-directory: redgeo
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: redgeo
+        run: go vet ./...
+
+      - name: go build
+        working-directory: redgeo
+        run: go build ./...
+
+      - name: go test (race)
+        working-directory: redgeo
+        run: go test ./... -race -count=1
