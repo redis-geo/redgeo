@@ -61,6 +61,16 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return str.ParseSetEX(b, 1000)
 	case "psetex":
 		return str.ParseSetEX(b, 1)
+	case "incr":
+		return str.ParseIncr(b, 1)
+	case "decr":
+		return str.ParseIncr(b, -1)
+	case "incrby":
+		return str.ParseIncrBy(b, 1)
+	case "decrby":
+		return str.ParseIncrBy(b, -1)
+	case "incrbyfloat":
+		return str.ParseIncrByFloat(b)
 
 	// key
 	case "del":
@@ -103,6 +113,10 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return hash.ParseHExists(b)
 	case "hget":
 		return hash.ParseHGet(b)
+	case "hincrby":
+		return hash.ParseHIncrBy(b)
+	case "hincrbyfloat":
+		return hash.ParseHIncrByFloat(b)
 	case "hgetall":
 		return hash.ParseHGetAll(b)
 	case "hkeys":

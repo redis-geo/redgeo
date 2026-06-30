@@ -19,7 +19,11 @@ func trimPrefix(s, p string) string { return strings.TrimPrefix(s, p) }
 func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.TypeID) error {
 	switch typ {
 	case core.TypeString:
-		// Tombstone this replica's value (and counter) slot, then meta.
+		// A string key is either a plain register or a PN-counter (§6.4).
+		if m, _, ok, err := s.readMeta(ctx, db, key); err == nil && ok && m.Flavor.isCounter() {
+			return s.deleteCounter(ctx, db, key)
+		}
+		// Tombstone this replica's value slot, then meta.
 		if err := s.writeSlot(ctx, strSlot(db, key, s.replica()), tagDeleted, nil); err != nil {
 			return err
 		}
@@ -63,6 +67,35 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.Key) error {
 	switch k.Type {
 	case core.TypeString:
+		m, _, _, err := s.readMeta(ctx, db, key)
+		if err != nil {
+			return err
+		}
+		if m.Flavor.isCounter() {
+			// Collapse the counter to a single component on this replica under
+			// the new key, preserving the total.
+			var comp []byte
+			if m.Flavor == flavorCounter {
+				sum, err := s.counterSumInt(ctx, db, key)
+				if err != nil {
+					return err
+				}
+				comp = []byte(fmt.Sprintf("%d", sum))
+			} else {
+				sum, err := s.counterSumFloat(ctx, db, key)
+				if err != nil {
+					return err
+				}
+				comp = ftoa(sum)
+			}
+			if err := s.eng.Put(ctx, counterSlot(db, newKey, s.replica()), comp); err != nil {
+				return err
+			}
+			return s.writeMeta(ctx, db, newKey, metaEnvelope{
+				KeyMeta: KeyMeta{Type: core.TypeString, ETimeMS: m.ETimeMS},
+				Flavor:  m.Flavor,
+			})
+		}
 		cands, err := s.readSlots(ctx, strBase(db, key))
 		if err != nil {
 			return err
@@ -70,10 +103,6 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 		v, live := liveValue(cands)
 		if !live {
 			return nil
-		}
-		m, _, _, err := s.readMeta(ctx, db, key)
-		if err != nil {
-			return err
 		}
 		if err := s.writeSlot(ctx, strSlot(db, newKey, s.replica()), tagPresent, v); err != nil {
 			return err

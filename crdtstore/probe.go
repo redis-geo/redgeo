@@ -41,7 +41,7 @@ func (s *Store) probe(ctx context.Context, db int, key string) (core.Key, bool, 
 func (s *Store) isLive(ctx context.Context, db int, key string, m metaEnvelope) (bool, error) {
 	switch m.Type {
 	case core.TypeString:
-		if m.Flavor == flavorCounter {
+		if m.Flavor.isCounter() {
 			return s.counterExists(ctx, db, key)
 		}
 		cands, err := s.readSlots(ctx, strBase(db, key))
@@ -76,9 +76,6 @@ func (s *Store) anyPrefix(ctx context.Context, prefix string) (bool, error) {
 // Until a type's repo lands, no data of that type exists, so these report
 // "not live"; each is replaced with a real check in its phase.
 
-func (s *Store) counterExists(ctx context.Context, db int, key string) (bool, error) {
-	return false, nil // Phase 4
-}
 func (s *Store) hashAnyLive(ctx context.Context, db int, key string) (bool, error) {
 	items, err := s.hashLiveFields(ctx, db, key)
 	return len(items) > 0, err

@@ -23,10 +23,16 @@ type KeyMeta struct {
 type strFlavor uint8
 
 const (
-	flavorNone    strFlavor = 0 // non-string types
-	flavorString  strFlavor = 1 // plain string register
-	flavorCounter strFlavor = 2 // PN-counter (§6.4)
+	flavorNone         strFlavor = 0 // non-string types
+	flavorString       strFlavor = 1 // plain string register
+	flavorCounter      strFlavor = 2 // integer PN-counter (§6.4)
+	flavorCounterFloat strFlavor = 3 // float PN-counter (§6.4)
 )
+
+// isCounter reports whether a flavor is one of the PN-counter flavors.
+func (f strFlavor) isCounter() bool {
+	return f == flavorCounter || f == flavorCounterFloat
+}
 
 // metaEnvelope is KeyMeta plus the string flavor, encoded into a slot value.
 type metaEnvelope struct {
