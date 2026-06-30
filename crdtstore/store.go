@@ -25,6 +25,7 @@ type Store struct {
 	locks   *lockManager
 	listSeq uint64       // monotonic tiebreaker for list element positions (§6.5)
 	resume  *resumeTable // SCAN cursor resume table (§6.9)
+	txn     *txn         // non-nil on a MULTI/EXEC-bound Store (§6.10)
 }
 
 // scanCursorTTLMS is the idle TTL for SCAN cursor resume entries.
@@ -63,7 +64,7 @@ func (s *Store) stamp() hlc.Stamp { return s.eng.Clock().Now() }
 // a map keyed by replicaID (the trailing path segment). Malformed slots are
 // skipped rather than failing the whole read.
 func (s *Store) readSlots(ctx context.Context, base string) (map[string]slot, error) {
-	entries, err := s.eng.QueryPrefix(ctx, base, false)
+	entries, err := s.query(ctx, base, false)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +87,7 @@ func (s *Store) readSlots(ctx context.Context, base string) (map[string]slot, er
 // writeSlot writes this replica's slot at slotKey with a fresh HLC stamp.
 func (s *Store) writeSlot(ctx context.Context, slotKey ds.Key, tag byte, value []byte) error {
 	env := encodeSlot(slot{stamp: s.stamp(), tag: tag, value: value})
-	return s.eng.Put(ctx, slotKey, env)
+	return s.put(ctx, slotKey, env)
 }
 
 // lastSegment returns the final '/'-delimited component of a ds.Key string.

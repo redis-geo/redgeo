@@ -90,7 +90,7 @@ func (r keyRepo) scanKeys(startP int, last string, count int, keep func(name str
 	lastConsumed := last // last meta entry fully consumed
 	for p := startP; p < NumBuckets; p++ {
 		prefix := dbMetaPrefixes(r.db)[p]
-		entries, qerr := r.s.eng.QueryPrefix(ctx, prefix, true)
+		entries, qerr := r.s.query(ctx, prefix, true)
 		if qerr != nil {
 			return nil, 0, "", false, qerr
 		}

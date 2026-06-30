@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
@@ -107,13 +108,23 @@ func (h *handler) doExec(conn redcon.Conn, st *connState) {
 		conn.WriteError("EXECABORT Transaction discarded because of previous errors.")
 		return
 	}
-	// Run queued commands sequentially. Each writes its own reply element; we
-	// frame them in one array. No isolation/rollback (Redis-compatible, §6.10).
-	// Atomic propagation via a single CRDT Batch is a documented refinement.
-	red := h.store.Redka(st.db)
+	// Run queued commands against a transaction-bound store: their writes
+	// accumulate into one CRDT Batch (committed as a single atomic delta) and a
+	// read-your-writes overlay so later commands see earlier ones (§6.10). No
+	// isolation/rollback — Redis-compatible.
+	stx, commit, err := h.store.BeginTxn(context.Background())
+	if err != nil {
+		conn.WriteError("ERR " + err.Error())
+		return
+	}
+	red := stx.Redka(st.db)
 	conn.WriteArray(len(queued))
 	for _, pcmd := range queued {
 		_, _ = pcmd.Run(conn, red)
+	}
+	if err := commit(); err != nil {
+		// Replies were already written; log path is the caller's. Best-effort.
+		_ = err
 	}
 }
 

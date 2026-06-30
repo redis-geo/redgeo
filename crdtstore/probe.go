@@ -65,7 +65,7 @@ func (s *Store) isLive(ctx context.Context, db int, key string, m metaEnvelope) 
 // anyPrefix reports whether any key exists under prefix (used for presence-only
 // member spaces such as sets and lists).
 func (s *Store) anyPrefix(ctx context.Context, prefix string) (bool, error) {
-	entries, err := s.eng.QueryPrefix(ctx, prefix, true)
+	entries, err := s.query(ctx, prefix, true)
 	if err != nil {
 		return false, err
 	}

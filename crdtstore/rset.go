@@ -37,7 +37,7 @@ func (r setRepo) ensureSetType(ctx context.Context, key string) error {
 // members returns the live member strings of a set.
 func (r setRepo) members(ctx context.Context, key string) ([]string, error) {
 	base := setBase(r.db, key)
-	entries, err := r.s.eng.QueryPrefix(ctx, base, true)
+	entries, err := r.s.query(ctx, base, true)
 	if err != nil {
 		return nil, err
 	}
@@ -68,11 +68,11 @@ func (r setRepo) Add(key string, elems ...any) (int, error) {
 			return added, err
 		}
 		mk := setMember(r.db, key, string(m))
-		has, err := r.s.eng.Has(ctx, mk)
+		has, err := r.s.has(ctx, mk)
 		if err != nil {
 			return added, err
 		}
-		if err := r.s.eng.Put(ctx, mk, presence); err != nil {
+		if err := r.s.put(ctx, mk, presence); err != nil {
 			return added, err
 		}
 		if !has {
@@ -99,14 +99,14 @@ func (r setRepo) Delete(key string, elems ...any) (int, error) {
 			return removed, err
 		}
 		mk := setMember(r.db, key, string(m))
-		has, err := r.s.eng.Has(ctx, mk)
+		has, err := r.s.has(ctx, mk)
 		if err != nil {
 			return removed, err
 		}
 		if !has {
 			continue
 		}
-		if err := r.s.eng.Delete(ctx, mk); err != nil { // OR-Set remove
+		if err := r.s.del(ctx, mk); err != nil { // OR-Set remove
 			return removed, err
 		}
 		removed++
@@ -126,7 +126,7 @@ func (r setRepo) Exists(key string, elem any) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return r.s.eng.Has(ctx, setMember(r.db, key, string(m)))
+	return r.s.has(ctx, setMember(r.db, key, string(m)))
 }
 
 func (r setRepo) Items(key string) ([]core.Value, error) {
@@ -180,7 +180,7 @@ func (r setRepo) Pop(key string) (core.Value, error) {
 		return nil, core.ErrNotFound
 	}
 	pick := mem[rand.Intn(len(mem))]
-	if err := r.s.eng.Delete(ctx, setMember(r.db, key, pick)); err != nil {
+	if err := r.s.del(ctx, setMember(r.db, key, pick)); err != nil {
 		return nil, err
 	}
 	if len(mem) == 1 {
@@ -212,17 +212,17 @@ func (r setRepo) Move(src, dest string, elem any) error {
 		return err
 	}
 	srcMk := setMember(r.db, src, string(m))
-	has, err := r.s.eng.Has(ctx, srcMk)
+	has, err := r.s.has(ctx, srcMk)
 	if err != nil {
 		return err
 	}
 	if !has {
 		return core.ErrNotFound
 	}
-	if err := r.s.eng.Delete(ctx, srcMk); err != nil {
+	if err := r.s.del(ctx, srcMk); err != nil {
 		return err
 	}
-	if err := r.s.eng.Put(ctx, setMember(r.db, dest, string(m)), presence); err != nil {
+	if err := r.s.put(ctx, setMember(r.db, dest, string(m)), presence); err != nil {
 		return err
 	}
 	if err := r.s.writeMeta(ctx, r.db, dest, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeSet}}); err != nil {
@@ -318,11 +318,11 @@ func (r setRepo) storeResult(dest string, vals []core.Value) (int, error) {
 	if k, ok, err := r.s.probe(ctx, r.db, dest); err == nil && ok && k.Type == core.TypeSet {
 		mem, _ := r.members(ctx, dest)
 		for _, m := range mem {
-			_ = r.s.eng.Delete(ctx, setMember(r.db, dest, m))
+			_ = r.s.del(ctx, setMember(r.db, dest, m))
 		}
 	}
 	for _, v := range vals {
-		if err := r.s.eng.Put(ctx, setMember(r.db, dest, v.String()), presence); err != nil {
+		if err := r.s.put(ctx, setMember(r.db, dest, v.String()), presence); err != nil {
 			return 0, err
 		}
 	}

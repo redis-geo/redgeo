@@ -27,7 +27,7 @@ func (r keyRepo) listKeys(ctx context.Context) ([]string, error) {
 	seen := make(map[string]struct{})
 	var keys []string
 	for _, prefix := range dbMetaPrefixes(r.db) {
-		entries, err := r.s.eng.QueryPrefix(ctx, prefix, true)
+		entries, err := r.s.query(ctx, prefix, true)
 		if err != nil {
 			return nil, err
 		}

@@ -98,7 +98,7 @@ func (s *Store) ObserveFromSlots(ctx context.Context, w *Watermark) error {
 	// high-water marks. Meta is the most complete per-key, per-replica index.
 	for db := 0; db < numDBs; db++ {
 		for _, prefix := range dbMetaPrefixes(db) {
-			entries, err := s.eng.QueryPrefix(ctx, prefix, false)
+			entries, err := s.query(ctx, prefix, false)
 			if err != nil {
 				return err
 			}

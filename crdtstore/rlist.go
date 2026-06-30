@@ -85,7 +85,7 @@ func (r listRepo) ensureListType(ctx context.Context, key string) error {
 // entries returns the list's elements in position order.
 func (r listRepo) entries(ctx context.Context, key string) ([]listEntry, error) {
 	base := listBase(r.db, key)
-	raw, err := r.s.eng.QueryPrefix(ctx, base, false)
+	raw, err := r.s.query(ctx, base, false)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (r listRepo) push(key string, elem any, front bool) (int, error) {
 	default:
 		pos = es[len(es)-1].pos + 1
 	}
-	if err := r.s.eng.Put(ctx, listElem(r.db, key, r.makePosKey(pos)), b); err != nil {
+	if err := r.s.put(ctx, listElem(r.db, key, r.makePosKey(pos)), b); err != nil {
 		return 0, err
 	}
 	if err := r.s.writeMeta(ctx, r.db, key, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeList}}); err != nil {
@@ -160,7 +160,7 @@ func (r listRepo) pop(key string, front bool) (core.Value, error) {
 	} else {
 		victim = es[len(es)-1]
 	}
-	if err := r.s.eng.Delete(ctx, listElem(r.db, key, victim.posKey)); err != nil {
+	if err := r.s.del(ctx, listElem(r.db, key, victim.posKey)); err != nil {
 		return nil, err
 	}
 	if len(es) == 1 {
@@ -217,7 +217,7 @@ func (r listRepo) Set(key string, idx int, elem any) error {
 		return core.ErrNotFound
 	}
 	// Overwrite the value at the same position (register; LSET races, §6.5).
-	return r.s.eng.Put(ctx, listElem(r.db, key, es[i].posKey), b)
+	return r.s.put(ctx, listElem(r.db, key, es[i].posKey), b)
 }
 
 func (r listRepo) Range(key string, start, stop int) ([]core.Value, error) {
@@ -283,7 +283,7 @@ func (r listRepo) insert(key string, pivot, elem any, before bool) (int, error) 
 			pos = (es[pivotIdx].pos + es[pivotIdx+1].pos) / 2
 		}
 	}
-	if err := r.s.eng.Put(ctx, listElem(r.db, key, r.makePosKey(pos)), eb); err != nil {
+	if err := r.s.put(ctx, listElem(r.db, key, r.makePosKey(pos)), eb); err != nil {
 		return 0, err
 	}
 	return len(es) + 1, nil
@@ -332,7 +332,7 @@ func (r listRepo) deleteMatching(key string, elem any, count int) (int, error) {
 		if string(es[i].value) != string(tb) {
 			continue
 		}
-		if err := r.s.eng.Delete(ctx, listElem(r.db, key, es[i].posKey)); err != nil {
+		if err := r.s.del(ctx, listElem(r.db, key, es[i].posKey)); err != nil {
 			return removed, err
 		}
 		removed++
@@ -373,7 +373,7 @@ func (r listRepo) Trim(key string, start, stop int) (int, error) {
 		if i >= lo && i <= hi {
 			continue
 		}
-		if err := r.s.eng.Delete(ctx, listElem(r.db, key, e.posKey)); err != nil {
+		if err := r.s.del(ctx, listElem(r.db, key, e.posKey)); err != nil {
 			return removed, err
 		}
 		removed++

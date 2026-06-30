@@ -49,7 +49,7 @@ func (r zsetRepo) ensureZSetType(ctx context.Context, key string) error {
 // liveScores returns the winning score of every live member of a zset.
 func (s *Store) zsetLiveScores(ctx context.Context, db int, key string) (map[string]float64, error) {
 	base := zsetBase(db, key)
-	entries, err := s.eng.QueryPrefix(ctx, base, false)
+	entries, err := s.query(ctx, base, false)
 	if err != nil {
 		return nil, err
 	}

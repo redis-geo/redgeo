@@ -21,7 +21,7 @@ import (
 // counterComponentsInt returns each replica's int64 component for a key.
 func (s *Store) counterComponentsInt(ctx context.Context, db int, key string) (map[string]int64, error) {
 	base := counterBase(db, key)
-	entries, err := s.eng.QueryPrefix(ctx, base, false)
+	entries, err := s.query(ctx, base, false)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (s *Store) counterSumInt(ctx context.Context, db int, key string) (int64, e
 
 func (s *Store) counterComponentsFloat(ctx context.Context, db int, key string) (map[string]float64, error) {
 	base := counterBase(db, key)
-	entries, err := s.eng.QueryPrefix(ctx, base, false)
+	entries, err := s.query(ctx, base, false)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (s *Store) incrInt(ctx context.Context, db int, key string, delta int64, et
 	}
 	mine := comps[s.replica()]
 	mine += delta
-	if err := s.eng.Put(ctx, counterSlot(db, key, s.replica()), []byte(strconv.FormatInt(mine, 10))); err != nil {
+	if err := s.put(ctx, counterSlot(db, key, s.replica()), []byte(strconv.FormatInt(mine, 10))); err != nil {
 		return 0, err
 	}
 	if err := s.writeMeta(ctx, db, key, metaEnvelope{
@@ -128,7 +128,7 @@ func (s *Store) incrFloat(ctx context.Context, db int, key string, delta float64
 	}
 	mine := comps[s.replica()]
 	mine += delta
-	if err := s.eng.Put(ctx, counterSlot(db, key, s.replica()), ftoa(mine)); err != nil {
+	if err := s.put(ctx, counterSlot(db, key, s.replica()), ftoa(mine)); err != nil {
 		return 0, err
 	}
 	if err := s.writeMeta(ctx, db, key, metaEnvelope{
@@ -150,7 +150,7 @@ func (s *Store) incrFloat(ctx context.Context, db int, key string, delta float64
 // deleteCounter tombstones every counter component of a key plus its meta.
 func (s *Store) deleteCounter(ctx context.Context, db int, key string) error {
 	base := counterBase(db, key)
-	entries, err := s.eng.QueryPrefix(ctx, base, true)
+	entries, err := s.query(ctx, base, true)
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func (s *Store) deleteCounter(ctx context.Context, db int, key string) error {
 		if derr != nil {
 			continue
 		}
-		if err := s.eng.Delete(ctx, counterSlot(db, key, replica)); err != nil {
+		if err := s.del(ctx, counterSlot(db, key, replica)); err != nil {
 			return err
 		}
 	}

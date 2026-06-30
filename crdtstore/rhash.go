@@ -36,7 +36,7 @@ type hashRepo struct {
 // the sum of their per-replica components. Shared by hashRepo and the probe.
 func (s *Store) hashLiveFields(ctx context.Context, db int, key string) (map[string]core.Value, error) {
 	base := hashBase(db, key)
-	entries, err := s.eng.QueryPrefix(ctx, base, false)
+	entries, err := s.query(ctx, base, false)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (s *Store) hashLiveFields(ctx context.Context, db int, key string) (map[str
 // counter fields via ds.Delete of their components. Caller holds the key lock.
 func (s *Store) deleteHashData(ctx context.Context, db int, key string) error {
 	base := hashBase(db, key)
-	entries, err := s.eng.QueryPrefix(ctx, base, false)
+	entries, err := s.query(ctx, base, false)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (s *Store) deleteHashData(ctx context.Context, db int, key string) error {
 				return err
 			}
 		case len(parts) == 3 && parts[1] == "c": // counter component
-			if err := s.eng.Delete(ctx, ds.NewKey(e.Key)); err != nil {
+			if err := s.del(ctx, ds.NewKey(e.Key)); err != nil {
 				return err
 			}
 		}
@@ -133,7 +133,7 @@ func (s *Store) deleteHashData(ctx context.Context, db int, key string) error {
 // newKey, preserving flavor. Caller holds both key locks.
 func (s *Store) copyHashData(ctx context.Context, db int, key, newKey string) error {
 	base := hashBase(db, key)
-	entries, err := s.eng.QueryPrefix(ctx, base, false)
+	entries, err := s.query(ctx, base, false)
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func (s *Store) copyHashData(ctx context.Context, db int, key, newKey string) er
 			if derr != nil {
 				continue
 			}
-			if err := s.eng.Put(ctx, hashFieldCounterSlot(db, newKey, field, replica), e.Value); err != nil {
+			if err := s.put(ctx, hashFieldCounterSlot(db, newKey, field, replica), e.Value); err != nil {
 				return err
 			}
 		}
@@ -177,7 +177,7 @@ func (s *Store) hashFieldIsCounter(ctx context.Context, db int, key, field strin
 // hashCounterSum sums a field's PN-counter components.
 func (s *Store) hashCounterSum(ctx context.Context, db int, key, field string) (float64, error) {
 	base := hashFieldCounterBase(db, key, field)
-	entries, err := s.eng.QueryPrefix(ctx, base, false)
+	entries, err := s.query(ctx, base, false)
 	if err != nil {
 		return 0, err
 	}
@@ -194,7 +194,7 @@ func (s *Store) hashCounterSum(ctx context.Context, db int, key, field string) (
 // replica, returning the new global total. Caller holds the key lock.
 func (s *Store) hashFieldIncr(ctx context.Context, db int, key, field string, delta float64) (float64, error) {
 	base := hashFieldCounterBase(db, key, field)
-	entries, err := s.eng.QueryPrefix(ctx, base, false)
+	entries, err := s.query(ctx, base, false)
 	if err != nil {
 		return 0, err
 	}
@@ -211,7 +211,7 @@ func (s *Store) hashFieldIncr(ctx context.Context, db int, key, field string, de
 		}
 	}
 	mine += delta
-	if err := s.eng.Put(ctx, hashFieldCounterSlot(db, key, field, s.replica()), []byte(fmtNum(mine))); err != nil {
+	if err := s.put(ctx, hashFieldCounterSlot(db, key, field, s.replica()), []byte(fmtNum(mine))); err != nil {
 		return 0, err
 	}
 	if err := s.writeMeta(ctx, db, key, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeHash}}); err != nil {

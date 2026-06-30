@@ -34,7 +34,7 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 		}
 		return s.deleteMeta(ctx, db, key)
 	case core.TypeSet:
-		entries, err := s.eng.QueryPrefix(ctx, setBase(db, key), true)
+		entries, err := s.query(ctx, setBase(db, key), true)
 		if err != nil {
 			return err
 		}
@@ -44,7 +44,7 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 			if derr != nil {
 				continue
 			}
-			if err := s.eng.Delete(ctx, setMember(db, key, m)); err != nil {
+			if err := s.del(ctx, setMember(db, key, m)); err != nil {
 				return err
 			}
 		}
@@ -61,13 +61,13 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 		}
 		return s.deleteMeta(ctx, db, key)
 	case core.TypeList:
-		entries, err := s.eng.QueryPrefix(ctx, listBase(db, key), true)
+		entries, err := s.query(ctx, listBase(db, key), true)
 		if err != nil {
 			return err
 		}
 		base := listBase(db, key)
 		for _, e := range entries {
-			if err := s.eng.Delete(ctx, listElem(db, key, trimPrefix(e.Key, base))); err != nil {
+			if err := s.del(ctx, listElem(db, key, trimPrefix(e.Key, base))); err != nil {
 				return err
 			}
 		}
@@ -105,7 +105,7 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 				}
 				comp = ftoa(sum)
 			}
-			if err := s.eng.Put(ctx, counterSlot(db, newKey, s.replica()), comp); err != nil {
+			if err := s.put(ctx, counterSlot(db, newKey, s.replica()), comp); err != nil {
 				return err
 			}
 			return s.writeMeta(ctx, db, newKey, metaEnvelope{
@@ -134,7 +134,7 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 		}
 		return s.writeMeta(ctx, db, newKey, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeHash}})
 	case core.TypeSet:
-		entries, err := s.eng.QueryPrefix(ctx, setBase(db, key), true)
+		entries, err := s.query(ctx, setBase(db, key), true)
 		if err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 			if derr != nil {
 				continue
 			}
-			if err := s.eng.Put(ctx, setMember(db, newKey, m), presence); err != nil {
+			if err := s.put(ctx, setMember(db, newKey, m), presence); err != nil {
 				return err
 			}
 		}
@@ -162,14 +162,14 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 		return s.writeMeta(ctx, db, newKey, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeZSet}})
 	case core.TypeList:
 		// Preserve order by copying each element under the same position key.
-		entries, err := s.eng.QueryPrefix(ctx, listBase(db, key), false)
+		entries, err := s.query(ctx, listBase(db, key), false)
 		if err != nil {
 			return err
 		}
 		base := listBase(db, key)
 		for _, e := range entries {
 			posKey := trimPrefix(e.Key, base)
-			if err := s.eng.Put(ctx, listElem(db, newKey, posKey), e.Value); err != nil {
+			if err := s.put(ctx, listElem(db, newKey, posKey), e.Value); err != nil {
 				return err
 			}
 		}

@@ -19,7 +19,7 @@ func (s *Store) SweepExpired(ctx context.Context) (int, error) {
 	swept := 0
 	for db := 0; db < numDBs; db++ {
 		for _, prefix := range dbMetaPrefixes(db) {
-			entries, err := s.eng.QueryPrefix(ctx, prefix, false)
+			entries, err := s.query(ctx, prefix, false)
 			if err != nil {
 				return swept, err
 			}
