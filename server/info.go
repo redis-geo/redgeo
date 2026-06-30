@@ -29,6 +29,11 @@ func (h *handler) doHello(conn redcon.Conn, st *connState, args [][]byte) {
 	if proto == 0 {
 		proto = 2
 	}
+	// Record the negotiated protocol on the connection so all subsequent
+	// type-distinct replies (null/map/double/bool) and pub/sub push frames use
+	// the right encoding (handled natively by the redcon fork).
+	conn.SetProto(proto)
+
 	fields := [][2]string{
 		{"server", "redgeo"},
 		{"version", Version},
@@ -38,8 +43,7 @@ func (h *handler) doHello(conn redcon.Conn, st *connState, args [][]byte) {
 		{"role", "master"},
 	}
 	// RESP3 returns a map; RESP2 a flat array (WriteMap handles both).
-	w := newRespWriter(conn, proto)
-	w.WriteMap(len(fields))
+	conn.WriteMap(len(fields))
 	for _, kv := range fields {
 		conn.WriteBulkString(kv[0])
 		conn.WriteBulkString(kv[1])

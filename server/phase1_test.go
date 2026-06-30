@@ -77,6 +77,16 @@ func readReply(r *bufio.Reader) (reply, error) {
 			}
 		}
 		return reply{Kind: '%', Arr: arr}, nil
+	case '>': // RESP3 push: N elements follow (e.g. pub/sub)
+		n, _ := strconv.Atoi(rest)
+		arr := make([]reply, n)
+		for i := 0; i < n; i++ {
+			arr[i], err = readReply(r)
+			if err != nil {
+				return reply{}, err
+			}
+		}
+		return reply{Kind: '>', Arr: arr}, nil
 	case '$':
 		n, _ := strconv.Atoi(rest)
 		if n < 0 {

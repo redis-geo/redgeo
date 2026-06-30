@@ -164,3 +164,7 @@ require (
 // Consume the redis-geo fork of go-ds-crdt (DESIGN §7.1).
 // Local path for dev; pin to a fork commit for CI.
 replace github.com/ipfs/go-ds-crdt => ../go-ds-crdt
+
+// Consume the redis-geo fork of redcon for native RESP3 support (map/double/
+// null/boolean replies + RESP3 push frames for pub/sub). Local path for dev.
+replace github.com/tidwall/redcon => ../redcon

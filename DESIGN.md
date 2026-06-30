@@ -682,13 +682,18 @@ The keyspace `SCAN` has a real resumable numeric cursor backed by a per-node
 elements of one key in a single page (cursor `0`). This is valid Redis SCAN
 behavior for a bounded single key, but large collections are not paginated.
 
-### 12.4 RESP3 is partial: scalar types yes, push frames no
-HELLO negotiates RESP2/RESP3 and the type-distinct **scalar** replies are
-emitted correctly under proto 3 (map, double, null, boolean — §6.11). redcon
-speaks RESP2 on the wire, so RESP3 is produced via raw encoding; **push-type
-frames are not implemented** — pub/sub messages (§6.12) are still delivered as
-RESP2-shaped arrays, so true RESP3 push (out-of-band messages on the same
-connection) is unavailable.
+### 12.4 RESP3 — fully supported via the forked redcon *(resolved)*
+HELLO negotiates RESP2/RESP3; under proto 3 the connection emits native RESP3
+types — null (`_`), map (`%`), double (`,`), boolean (`#`) — and pub/sub
+delivers subscribe/unsubscribe confirmations and messages as **push frames**
+(`>`). This is implemented in the **redis-geo fork of redcon** (`../redcon`,
+consumed via a `replace`): the connection carries a negotiated `proto` (set by
+`SetProto` on HELLO), the `Writer` gained proto-aware `WriteNull/WriteMap/
+WriteDouble/WriteBool/WritePush`, and `PubSub` uses push frames when the
+subscriber is RESP3. RESP2 clients are unaffected (every method falls back to
+the RESP2 encoding). This supersedes the earlier "scalar-only / no push"
+limitation. Like the go-ds-crdt fork, the redcon fork is a `replace`-to-local
+dependency (§12.6) that must be pinned for CI.
 
 ### 12.5 Pub/sub is local-only
 `(P)SUBSCRIBE`/`PUBLISH` work within a single node via redcon's built-in PubSub
@@ -696,14 +701,17 @@ connection) is unavailable.
 gossipsub topic — is not wired; a publish on one node is not seen by subscribers
 on another.
 
-### 12.6 go-ds-crdt fork dependency is not merged/pinned
-redgeo consumes the **redis-geo fork** of go-ds-crdt via a `replace` to a local
-path (`../go-ds-crdt`) for development (§7.1). The 256-partition viability
-depends on the fork's lazy-`broadcastBatchCh` patch (§11), which lives on the
-fork branch `lazy-broadcast-batch-ch` and is **not merged to the fork's
-`master`**. A fresh clone won't build until the fork is checked out as a sibling
-**or** the `replace` is repinned to a fork commit (the §7.1 "CI" form). This must
-be resolved before any reproducible/CI build.
+### 12.6 Fork dependencies are not merged/pinned
+redgeo consumes **two redis-geo forks** via `replace` to local paths for
+development, so a fresh clone won't build until they are checked out as siblings
+**or** the `replace`s are repinned to fork commits (the §7.1 "CI" form):
+- **go-ds-crdt** (`../go-ds-crdt`, §7.1) — the 256-partition viability depends
+  on its lazy-`broadcastBatchCh` patch (§11), on fork branch
+  `lazy-broadcast-batch-ch`, **not merged to the fork `master`**.
+- **redcon** (`../redcon`, §12.4) — native RESP3 support (proto-aware writers +
+  pub/sub push frames). Needs the same pin-for-CI treatment.
+
+This must be resolved before any reproducible/CI build.
 
 ### 12.7 Hash-field counter numeric type is float-backed
 Hash-field PN-counter components are stored as decimal `float64` and summed as
