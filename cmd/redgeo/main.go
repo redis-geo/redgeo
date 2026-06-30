@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/redis-geo/redgeo/crdtstore"
 	"github.com/redis-geo/redgeo/engine"
@@ -43,6 +44,13 @@ func main() {
 	defer eng.Close()
 
 	store := crdtstore.NewStore(eng)
+
+	// Active TTL sweeper (DESIGN §6.8). Lazy filtering already hides expired
+	// keys on read; the sweeper reclaims their storage.
+	sweeper := crdtstore.NewSweeper(store, 10*time.Second)
+	sweeper.Start(ctx)
+	defer sweeper.Stop()
+
 	srv := server.New(*addr, store)
 
 	ready := make(chan error, 1)

@@ -57,6 +57,10 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return str.ParseMSet(b)
 	case "strlen":
 		return str.ParseStrlen(b)
+	case "setex":
+		return str.ParseSetEX(b, 1000)
+	case "psetex":
+		return str.ParseSetEX(b, 1)
 
 	// key
 	case "del":
@@ -77,6 +81,20 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return key.ParseRename(b)
 	case "renamenx":
 		return key.ParseRenameNX(b)
+	case "ttl":
+		return key.ParseTTL(b)
+	case "pttl":
+		return key.ParsePTTL(b)
+	case "expire":
+		return key.ParseExpire(b, 1000)
+	case "pexpire":
+		return key.ParseExpire(b, 1)
+	case "expireat":
+		return key.ParseExpireAt(b, 1000)
+	case "pexpireat":
+		return key.ParseExpireAt(b, 1)
+	case "persist":
+		return key.ParsePersist(b)
 
 	// hash
 	case "hdel":

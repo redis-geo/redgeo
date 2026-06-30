@@ -129,7 +129,9 @@ func (r keyRepo) DeleteAll() error {
 }
 
 func (r keyRepo) Expire(key string, ttl time.Duration) error {
-	return r.ExpireAt(key, time.Now().Add(ttl))
+	// Use the store clock source (not time.Now) so TTLs are consistent with
+	// lazy expiry / the sweeper and are injectable in tests.
+	return r.setETime(key, nowMS()+ttl.Milliseconds())
 }
 
 func (r keyRepo) ExpireAt(key string, at time.Time) error {
