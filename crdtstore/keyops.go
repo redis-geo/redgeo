@@ -29,14 +29,8 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 		}
 		return s.deleteMeta(ctx, db, key)
 	case core.TypeHash:
-		fields, err := s.hashLiveFields(ctx, db, key)
-		if err != nil {
+		if err := s.deleteHashData(ctx, db, key); err != nil {
 			return err
-		}
-		for field := range fields {
-			if err := s.writeSlot(ctx, hashSlot(db, key, field, s.replica()), tagDeleted, nil); err != nil {
-				return err
-			}
 		}
 		return s.deleteMeta(ctx, db, key)
 	case core.TypeSet:
@@ -135,14 +129,8 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 			Flavor:  flavorString,
 		})
 	case core.TypeHash:
-		fields, err := s.hashLiveFields(ctx, db, key)
-		if err != nil {
+		if err := s.copyHashData(ctx, db, key, newKey); err != nil {
 			return err
-		}
-		for field, v := range fields {
-			if err := s.writeSlot(ctx, hashSlot(db, newKey, field, s.replica()), tagPresent, v.Bytes()); err != nil {
-				return err
-			}
 		}
 		return s.writeMeta(ctx, db, newKey, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeHash}})
 	case core.TypeSet:

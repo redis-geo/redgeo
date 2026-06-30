@@ -98,6 +98,18 @@ func hashSlot(db int, key, field, replica string) ds.Key {
 	return ds.NewKey(hashFieldBase(db, key, field) + encSeg(replica))
 }
 
+// hashFieldCounterBase / hashFieldCounterSlot hold a hash field's per-replica
+// PN-counter components (§6.4): /{P}/d/{db}/{key}/h/{field}/c/{replicaID}.
+// The literal "c" segment can't collide with an encoded replica ID (base32
+// never produces a lone "c").
+func hashFieldCounterBase(db int, key, field string) string {
+	return hashFieldBase(db, key, field) + "c/"
+}
+
+func hashFieldCounterSlot(db int, key, field, replica string) ds.Key {
+	return ds.NewKey(hashFieldCounterBase(db, key, field) + encSeg(replica))
+}
+
 // setBase / setMember hold presence-only OR-Set members (§6.3):
 // /{P}/d/{db}/{key}/e/{member}
 func setBase(db int, key string) string {

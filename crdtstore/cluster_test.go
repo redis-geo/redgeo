@@ -173,3 +173,56 @@ func TestRegisterLWWConverges(t *testing.T) {
 }
 
 var _ = redis.Redka{}
+
+// TestHashCounterConvergence: concurrent HINCRBY on the same field across
+// partitioned replicas sums correctly after heal (§6.4 PN-counter for hash
+// fields).
+func TestHashCounterConvergence(t *testing.T) {
+	stores, net := newCluster(t, 2)
+
+	if _, err := stores[0].Redka(0).Hash().Incr("h", "clicks", 1); err != nil {
+		t.Fatalf("hincrby: %v", err)
+	}
+	eventually(t, "r1 sees clicks=1", func() bool {
+		v, err := stores[1].Redka(0).Hash().Get("h", "clicks")
+		return err == nil && v.String() == "1"
+	})
+
+	net.SetPartitioned(0, true)
+	net.SetPartitioned(1, true)
+	if _, err := stores[0].Redka(0).Hash().Incr("h", "clicks", 5); err != nil {
+		t.Fatalf("hincrby r0: %v", err)
+	}
+	if _, err := stores[1].Redka(0).Hash().Incr("h", "clicks", 4); err != nil {
+		t.Fatalf("hincrby r1: %v", err)
+	}
+
+	net.SetPartitioned(0, false)
+	net.SetPartitioned(1, false)
+	for i := 0; i < 2; i++ {
+		i := i
+		eventually(t, "hash counter sums to 10", func() bool {
+			v, err := stores[i].Redka(0).Hash().Get("h", "clicks")
+			return err == nil && v.String() == "10"
+		})
+	}
+}
+
+// TestHashCounterFlavorRejection: HSET and HINCRBY don't mix on a field.
+func TestHashCounterFlavorRejection(t *testing.T) {
+	st := newTestStore(t)
+	h := st.Redka(0).Hash()
+
+	if _, err := h.Incr("h", "n", 1); err != nil {
+		t.Fatalf("hincrby new: %v", err)
+	}
+	if _, err := h.Set("h", "n", "x"); err == nil {
+		t.Fatal("HSET on a counter field should be rejected")
+	}
+	if _, err := h.Set("h", "name", "alice"); err != nil {
+		t.Fatalf("hset lww: %v", err)
+	}
+	if _, err := h.Incr("h", "name", 1); err == nil {
+		t.Fatal("HINCRBY on an LWW field should be rejected")
+	}
+}
