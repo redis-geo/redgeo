@@ -23,6 +23,11 @@ type RStr interface {
 	SetWith(key string, value any, opts restypes.SetOpts) (restypes.SetOut, error)
 	Incr(key string, delta int) (int, error)
 	IncrFloat(key string, delta float64) (float64, error)
+
+	// HyperLogLog (a string-typed sketch, merged by register-wise max).
+	PFAdd(key string, elems ...[]byte) (bool, error)
+	PFCount(keys ...string) (int64, error)
+	PFMerge(dest string, srcs ...string) error
 }
 
 // RKey is the generic key-management storage interface.

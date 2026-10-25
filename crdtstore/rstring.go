@@ -40,6 +40,8 @@ func (r strRepo) readValue(ctx context.Context, key string) (core.Value, error) 
 		return nil, err
 	}
 	switch m.Flavor {
+	case flavorHLL:
+		return nil, core.ErrKeyType // sketches are only reachable via PF* commands
 	case flavorCounter:
 		sum, err := r.s.counterSumInt(ctx, r.db, key)
 		if err != nil {
@@ -110,8 +112,14 @@ func (r strRepo) writeString(ctx context.Context, key string, b []byte, etimeMS 
 	// DESIGN §6.4: counters and plain strings are distinct flavors and don't
 	// mix. SET on a counter key is rejected (default policy) to eliminate the
 	// cross-replica SET-vs-INCR race.
-	if m, _, ok, err := r.s.readMeta(ctx, r.db, key); err == nil && ok && m.Flavor.isCounter() {
-		live, _ := r.s.counterExists(ctx, r.db, key)
+	if m, _, ok, err := r.s.readMeta(ctx, r.db, key); err == nil && ok {
+		var live bool
+		switch {
+		case m.Flavor.isCounter():
+			live, _ = r.s.counterExists(ctx, r.db, key)
+		case m.Flavor == flavorHLL:
+			live, _ = r.s.anyPrefix(ctx, hllBase(r.db, key))
+		}
 		if live {
 			return core.ErrKeyType
 		}

@@ -22,6 +22,8 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 		// A string key is either a plain register or a PN-counter (§6.4).
 		if m, _, ok, err := s.readMeta(ctx, db, key); err == nil && ok && m.Flavor.isCounter() {
 			return s.deleteCounter(ctx, db, key)
+		} else if err == nil && ok && m.Flavor == flavorHLL {
+			return s.deleteHLL(ctx, db, key)
 		}
 		// Tombstone this replica's value slot, then meta.
 		if err := s.writeSlot(ctx, strSlot(db, key, s.replica()), tagDeleted, nil); err != nil {
@@ -87,6 +89,9 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 		m, _, _, err := s.readMeta(ctx, db, key)
 		if err != nil {
 			return err
+		}
+		if m.Flavor == flavorHLL {
+			return s.copyHLL(ctx, db, key, newKey, m.ETimeMS)
 		}
 		if m.Flavor.isCounter() {
 			// Collapse the counter to a single component on this replica under

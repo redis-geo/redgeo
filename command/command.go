@@ -73,6 +73,12 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return str.ParseIncrBy(b, -1)
 	case "incrbyfloat":
 		return str.ParseIncrByFloat(b)
+	case "pfadd":
+		return str.ParsePFAdd(b)
+	case "pfcount":
+		return str.ParsePFCount(b)
+	case "pfmerge":
+		return str.ParsePFMerge(b)
 
 	// key
 	case "del":

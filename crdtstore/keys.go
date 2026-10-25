@@ -84,6 +84,17 @@ func counterSlot(db int, key, replica string) ds.Key {
 	return ds.NewKey(counterBase(db, key) + encSeg(replica))
 }
 
+// hllBase / hllSlot hold per-replica HyperLogLog sketches (§6.4-style
+// single-writer components, merged by register-wise max):
+// /{P}/d/{db}/{key}/p/{replicaID}
+func hllBase(db int, key string) string {
+	return fmt.Sprintf("%s/d/%d/%s/p/", part(db, key), db, encSeg(key))
+}
+
+func hllSlot(db int, key, replica string) ds.Key {
+	return ds.NewKey(hllBase(db, key) + encSeg(replica))
+}
+
 // hashBase / hashFieldBase / hashSlot hold per-field, per-replica LWW slots:
 // /{P}/d/{db}/{key}/h/{field}/{replicaID}
 func hashBase(db int, key string) string {

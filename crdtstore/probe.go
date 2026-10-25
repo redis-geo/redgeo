@@ -44,6 +44,9 @@ func (s *Store) isLive(ctx context.Context, db int, key string, m metaEnvelope) 
 		if m.Flavor.isCounter() {
 			return s.counterExists(ctx, db, key)
 		}
+		if m.Flavor == flavorHLL {
+			return s.anyPrefix(ctx, hllBase(db, key))
+		}
 		cands, err := s.readSlots(ctx, strBase(db, key))
 		if err != nil {
 			return false, err
