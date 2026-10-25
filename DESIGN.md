@@ -23,8 +23,11 @@ implementation.
 
 ### Non-goals (initially)
 - Strong consistency, linearizability, or `WATCH`/CAS optimistic locking.
-- Redis Cluster slot protocol, scripting (`EVAL`), Streams, Geo, Bitmaps,
-  HyperLogLog. (redka doesn't have these either.)
+- Redis Cluster slot protocol, scripting (`EVAL`), Streams, JSON. (redka
+  doesn't have these either.) HyperLogLog, bitmaps and geo were added later:
+  HLL as per-replica max-merged sketches, bitmaps as per-chunk LWW slots (a
+  concurrent flip inside the same 512-byte chunk can be lost), geo as a zset of
+  geohash scores.
 - Byte-for-byte Redis behavior on every edge case. We target the common subset
   with documented semantics.
 
@@ -476,7 +479,7 @@ stats (heads, max height, queued jobs via `InternalStats`).
 | **1 — conflict-free correct** | Converges with intuitive HLC-LWW / OR-Set / counter semantics | strings, hashes, sets, counters (dedicated), keys/scan, server |
 | **2 — converges, weaker semantics** | Eventually consistent; some ops race | zsets, lists, TTL, NX/XX existence checks |
 | **3 — best-effort / degraded** | No isolation/rollback/CAS | MULTI/EXEC, `*STORE` |
-| **out** | Not implemented | WATCH, scripting, streams, geo, bitmaps, HLL, cluster |
+| **out** | Not implemented | WATCH, scripting, streams, JSON, cluster |
 
 Estimated: **~60–70%** of common string/hash/set/key surface with *correct*
 active/active semantics; **~15%** more with documented weaker semantics.
