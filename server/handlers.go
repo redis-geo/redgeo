@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tidwall/redcon"
 
@@ -22,10 +23,12 @@ type handler struct {
 	bus       Bus       // optional: geo pub/sub (bus.go)
 	origin    string    // this replica, to drop our own bus echoes
 	compactor Compactor // optional: REDGEO.* admin commands (compact.go)
+	password  string    // optional: require AUTH (auth.go)
+	metrics   *metrics
 }
 
 func newHandler(store *crdtstore.Store) *handler {
-	return &handler{store: store, ps: &redcon.PubSub{}}
+	return &handler{store: store, ps: &redcon.PubSub{}, metrics: newMetrics()}
 }
 
 // serve is the redcon command callback (one call per command per connection).
@@ -36,6 +39,15 @@ func (h *handler) serve(conn redcon.Conn, rcmd redcon.Command) {
 	}
 	st := getState(conn)
 	name := strings.ToLower(string(rcmd.Args[0]))
+	failed := false
+	start := time.Now()
+	defer func() { h.metrics.record(name, time.Since(start), failed) }()
+
+	if h.needsAuth(st, name) {
+		failed = true
+		conn.WriteError(errNoAuth)
+		return
+	}
 
 	switch name {
 	case "select":
@@ -56,6 +68,9 @@ func (h *handler) serve(conn redcon.Conn, rcmd redcon.Command) {
 	case "publish":
 		h.doPublish(conn, rcmd.Args)
 		return
+	case "auth":
+		h.doAuth(conn, st, rcmd.Args)
+		return
 	case "hello":
 		h.doHello(conn, st, rcmd.Args)
 		return
@@ -70,6 +85,7 @@ func (h *handler) serve(conn redcon.Conn, rcmd redcon.Command) {
 	pcmd, err := command.Parse(rcmd.Args)
 	if err != nil {
 		// A parse error inside MULTI aborts the whole transaction (Redis).
+		failed = true
 		if st.inMulti {
 			st.aborted = true
 		}
@@ -93,13 +109,15 @@ func (h *handler) serve(conn redcon.Conn, rcmd redcon.Command) {
 			conn.WriteError("ERR " + err.Error())
 			return
 		}
-		_, _ = pcmd.Run(conn, stx.Redka(st.db))
+		_, rerr := pcmd.Run(conn, stx.Redka(st.db))
+		failed = rerr != nil
 		_ = commit() // best effort, as in EXEC
 		return
 	}
 
 	red := h.store.Redka(st.db)
-	_, _ = pcmd.Run(conn, red)
+	_, rerr := pcmd.Run(conn, red)
+	failed = rerr != nil
 }
 
 // ---- MULTI / EXEC / DISCARD (DESIGN §6.10) ----

@@ -43,6 +43,15 @@ func NewStore(eng *engine.Engine) *Store {
 // replica is this node's slot-owner identity.
 func (s *Store) replica() string { return s.eng.Replica() }
 
+// Generations reports each partition DAG's compaction generation.
+func (s *Store) Generations() []int {
+	out := make([]int, s.eng.NumPartitions())
+	for i := range out {
+		out[i] = s.eng.Generation(i)
+	}
+	return out
+}
+
 // ReplicaID returns this node's replica identity (for INFO/HELLO).
 func (s *Store) ReplicaID() string { return s.eng.Replica() }
 

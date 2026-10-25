@@ -5,9 +5,11 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,6 +32,10 @@ func main() {
 	bootstraps := flag.String("bootstrap", "", "comma-separated bootstrap peer multiaddrs")
 	partitions := flag.Int("partitions", 1, "number of named partition DAGs (multi-node; 256 = one per bucket)")
 	compactEvery := flag.Duration("compact-every", 0, "run cluster-wide compaction this often (0 = only on REDGEO.COMPACT); only the lowest replica ID acts")
+	requirePass := flag.String("requirepass", "", "require clients to AUTH with this password (or set REDGEO_REQUIREPASS, which keeps it out of the process list)")
+	tlsCert := flag.String("tls-cert", "", "TLS certificate file for the RESP listener (with -tls-key)")
+	tlsKey := flag.String("tls-key", "", "TLS private key file for the RESP listener")
+	metricsAddr := flag.String("metrics-addr", "", "serve Prometheus metrics at /metrics on this address (empty = off)")
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -122,6 +128,33 @@ func main() {
 
 	srv := server.New(*addr, store)
 	srv.SetCompactor(node)
+	pw := *requirePass
+	if pw == "" {
+		pw = os.Getenv("REDGEO_REQUIREPASS")
+	}
+	if pw != "" {
+		srv.SetPassword(pw)
+	}
+	if (*tlsCert == "") != (*tlsKey == "") {
+		log.Fatal("-tls-cert and -tls-key must be given together")
+	}
+	if *tlsCert != "" {
+		cert, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+		if err != nil {
+			log.Fatalf("tls: %v", err)
+		}
+		srv.SetTLS(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
+	}
+	if *metricsAddr != "" {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", srv.MetricsHandler())
+		go func() {
+			if err := http.ListenAndServe(*metricsAddr, mux); err != nil {
+				log.Printf("metrics server: %v", err)
+			}
+		}()
+		log.Printf("metrics on %s/metrics", *metricsAddr)
+	}
 	if bus != nil {
 		srv.SetBus(bus, rid)
 	}

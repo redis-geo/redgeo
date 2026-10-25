@@ -805,6 +805,16 @@ subtree cannot reappear when the node is re-created).
 - **Cost:** every command reads the whole document (O(size)); `TYPE` reports
   `ReJSON-RL`.
 
+### 12.3e Security and observability
+Client `AUTH` is a single shared password (`-requirepass`) compared in constant
+time; there are no per-user ACLs, no command restrictions and no brute-force
+throttling. TLS covers the RESP listener only. Cluster membership is **not**
+access-controlled: any libp2p peer that can reach the gossip topics and holds
+the cluster's topic names can join and read/write replicated data, so run the
+mesh on a private network (or behind a libp2p private-network key) until peer
+admission is added. Metrics are cheap counters (no keyspace scans); command
+labels are capped at 512 distinct names, the rest folded into `other`.
+
 ### 12.4 RESP3 — fully supported via the forked redcon *(resolved)*
 HELLO negotiates RESP2/RESP3; under proto 3 the connection emits native RESP3
 types — null (`_`), map (`%`), double (`,`), boolean (`#`) — and pub/sub

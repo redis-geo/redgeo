@@ -71,6 +71,9 @@ OK
 | `-p2p-listen` | `/ip4/0.0.0.0/tcp/0` | libp2p listen multiaddr |
 | `-bootstrap` | `""` | Comma-separated bootstrap peer multiaddrs |
 | `-partitions` | `1` | Number of named partition DAGs (multi-node; `256` = one per bucket) |
+| `-requirepass` | `""` | Require `AUTH` with this password (or set `REDGEO_REQUIREPASS` to keep it out of the process list) |
+| `-tls-cert`, `-tls-key` | `""` | Serve the RESP listener over TLS |
+| `-metrics-addr` | `""` | Serve Prometheus metrics at `/metrics` on this address |
 | `-compact-every` | `0` | Run cluster-wide compaction this often (`0` = only on `REDGEO.COMPACT`); only the lowest replica ID acts |
 
 ### Persistent, single node
@@ -94,6 +97,18 @@ go run ./cmd/redgeo -data ./b -addr :6381 -p2p -bootstrap /ip4/127.0.0.1/tcp/400
 Writes on either node replicate to the other and converge. Set `-partitions 256`
 on all nodes for per-partition DAGs (DESIGN §5.5, §11) — this is immutable once
 data exists, so decide it up front.
+
+### Security and observability
+
+`-requirepass` enables Redis-style `AUTH [username] password` (the only user is
+`default`; there are no ACL rules) and `HELLO … AUTH`; until a connection
+authenticates every other command is refused with `NOAUTH`. `-tls-cert/-tls-key`
+put the RESP listener behind TLS. These protect *client* connections only —
+node-to-node replication runs over libp2p, which encrypts and authenticates
+peers by their keys but does not restrict *which* peers may join a cluster.
+`-metrics-addr` exposes Prometheus metrics (command counts, errors and latency,
+connections, CRDT heads/height/queue, per-partition generation); `INFO` reports
+the same under `# Stats`, `# Commandstats` and `# Partitions`.
 
 ### Compaction
 

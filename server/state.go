@@ -16,6 +16,7 @@ type connState struct {
 	resp    int // negotiated RESP protocol version (2 or 3); 0 = default (2)
 	inMulti bool
 	aborted bool // a queued command failed to parse; EXEC must abort
+	authed  bool // passed AUTH (only meaningful when a password is set)
 	cmds    []redis.Cmd
 }
 
