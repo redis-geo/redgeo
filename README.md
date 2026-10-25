@@ -103,9 +103,9 @@ tier (DESIGN §6).
 | Tier | Behavior | Commands |
 |---|---|---|
 | **1 — conflict-free correct** | Converges with intuitive HLC-LWW / OR-Set / counter semantics | strings, hashes, sets, dedicated counters, HyperLogLog (`PF*`, max-merge), keys/SCAN, server |
-| **2 — converges, weaker** | Eventually consistent; some ops race before convergence | sorted sets, geo (zset-backed), bitmaps (LWW per 512-byte chunk), lists, TTL, NX/XX existence checks |
+| **2 — converges, weaker** | Eventually consistent; some ops race before convergence | sorted sets, streams (`XADD`/`XRANGE`/`XREAD`/`XDEL`/`XTRIM`), geo (zset-backed), bitmaps (LWW per 512-byte chunk), lists, TTL, NX/XX existence checks |
 | **3 — best-effort** | No isolation/rollback/CAS | MULTI/EXEC, `*STORE` |
-| **out** | Not implemented | WATCH, scripting (EVAL), streams, JSON, cluster |
+| **out** | Not implemented | WATCH, scripting (EVAL), stream consumer groups (`XGROUP`/`XREADGROUP`), JSON, cluster |
 
 Key semantic choices (see DESIGN §6 for the full list):
 

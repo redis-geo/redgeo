@@ -12,6 +12,7 @@ const (
 	TypeSet    = "set"
 	TypeString = "string"
 	TypeZSet   = "zset"
+	TypeStream = "stream"
 )
 
 // Iterates over the key names in the database.
@@ -33,7 +34,7 @@ func ParseScan(b redis.BaseCmd) (Scan, error) {
 		parser.Named("match", parser.String(&cmd.match)),
 		parser.Named("count", parser.Int(&cmd.count)),
 		parser.Named("type", parser.Enum(&cmd.ktype,
-			TypeHash, TypeList, TypeSet, TypeString, TypeZSet)),
+			TypeHash, TypeList, TypeSet, TypeString, TypeZSet, TypeStream)),
 	).Required(1).Run(cmd.Args())
 	if err != nil {
 		return Scan{}, err
@@ -75,6 +76,8 @@ func toTypeID(ktype string) core.TypeID {
 		return core.TypeString
 	case TypeZSet:
 		return core.TypeZSet
+	case TypeStream:
+		return core.TypeStream
 	default:
 		return core.TypeAny
 	}

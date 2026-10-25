@@ -23,7 +23,7 @@ implementation.
 
 ### Non-goals (initially)
 - Strong consistency, linearizability, or `WATCH`/CAS optimistic locking.
-- Redis Cluster slot protocol, scripting (`EVAL`), Streams, JSON. (redka
+- Redis Cluster slot protocol, scripting (`EVAL`), stream consumer groups, JSON. (redka
   doesn't have these either.) HyperLogLog, bitmaps and geo were added later:
   HLL as per-replica max-merged sketches, bitmaps as per-chunk LWW slots (a
   concurrent flip inside the same 512-byte chunk can be lost), geo as a zset of
@@ -479,7 +479,7 @@ stats (heads, max height, queued jobs via `InternalStats`).
 | **1 — conflict-free correct** | Converges with intuitive HLC-LWW / OR-Set / counter semantics | strings, hashes, sets, counters (dedicated), keys/scan, server |
 | **2 — converges, weaker semantics** | Eventually consistent; some ops race | zsets, lists, TTL, NX/XX existence checks |
 | **3 — best-effort / degraded** | No isolation/rollback/CAS | MULTI/EXEC, `*STORE` |
-| **out** | Not implemented | WATCH, scripting, streams, JSON, cluster |
+| **out** | Not implemented | WATCH, scripting, stream consumer groups, JSON, cluster |
 
 Estimated: **~60–70%** of common string/hash/set/key surface with *correct*
 active/active semantics; **~15%** more with documented weaker semantics.
@@ -687,6 +687,23 @@ the cursor token maps to the last member returned, with members ordered by name
 whole collection, so cost per page is O(n) in the collection size — the reply is
 bounded, the work is not. Cursors resolve only on the issuing node; an unknown
 or expired cursor restarts from the beginning.
+
+### 12.3b Streams: IDs, existence, cost
+Streams (`XADD/XLEN/XRANGE/XREVRANGE/XREAD/XDEL/XTRIM`) store each entry as a
+per-replica HLC-LWW slot keyed by ID (`/d/{db}/{key}/x/{ms}-{seq}/{replica}`),
+so concurrent `XADD`s never write the same key. Deviations and costs:
+- **Auto IDs are `ms-seq` with a replica discriminator in the low 16 bits of
+  `seq`** (`seq = counter<<16 | disc(replica)`), so two replicas minting an ID in
+  the same millisecond cannot collide. IDs are strictly increasing and valid, but
+  `seq` is not 0,1,2… as in Redis. Explicit IDs are checked against the locally
+  known top ID only; two replicas adding the same explicit ID resolve LWW.
+- Each replica keeps a max-merged last-ID register (`/xl/{replica}`); it makes
+  `XADD` O(replicas) and defines existence, so a stream survives deleting all its
+  entries (as in Redis) and IDs never go backwards.
+- `XLEN`/`XRANGE`/`XREAD` scan the whole stream (O(n)); `~` trimming is exact.
+- `XREAD BLOCK` polls the store (20 ms) and caps `BLOCK 0` at one minute.
+- Consumer groups (`XGROUP`, `XREADGROUP`, `XACK`, `XPENDING`, `XCLAIM`) are not
+  implemented: delivery/ack state is not conflict-free.
 
 ### 12.4 RESP3 — fully supported via the forked redcon *(resolved)*
 HELLO negotiates RESP2/RESP3; under proto 3 the connection emits native RESP3

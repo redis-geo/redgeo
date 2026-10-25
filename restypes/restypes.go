@@ -6,7 +6,11 @@
 // package without an import cycle.
 package restypes
 
-import "github.com/redis-geo/redgeo/core"
+import (
+	"strconv"
+
+	"github.com/redis-geo/redgeo/core"
+)
 
 // ---- strings ----
 
@@ -33,6 +37,69 @@ type BitRange struct {
 	Start, End       int64
 	HasStart, HasEnd bool
 	InBits           bool
+}
+
+// ---- streams ----
+
+// StreamID is a stream entry ID, ordered by (Ms, Seq).
+type StreamID struct{ Ms, Seq uint64 }
+
+func (a StreamID) Cmp(b StreamID) int {
+	switch {
+	case a.Ms != b.Ms:
+		if a.Ms < b.Ms {
+			return -1
+		}
+		return 1
+	case a.Seq != b.Seq:
+		if a.Seq < b.Seq {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+func (a StreamID) String() string {
+	return strconv.FormatUint(a.Ms, 10) + "-" + strconv.FormatUint(a.Seq, 10)
+}
+
+// StreamEntry is one stream entry: an ID and its flat field/value list.
+type StreamEntry struct {
+	ID     StreamID
+	Fields [][]byte
+}
+
+// StreamBound is one end of an XRANGE interval.
+type StreamBound struct {
+	ID   StreamID
+	Excl bool
+}
+
+// StreamIDMode says how XADD picks the ID.
+type StreamIDMode int
+
+const (
+	IDExplicit StreamIDMode = iota // ms-seq given
+	IDAuto                         // *
+	IDAutoSeq                      // ms-*
+)
+
+// StreamTrim is a MAXLEN / MINID trim request (approximate "~" is treated as
+// exact, which satisfies its "at least" contract).
+type StreamTrim struct {
+	MaxLen   int64 // >= 0 when ByMaxLen
+	ByMaxLen bool
+	MinID    StreamID
+	ByMinID  bool
+}
+
+// StreamAddOpts carries the options of XADD.
+type StreamAddOpts struct {
+	NoMkStream bool
+	Mode       StreamIDMode
+	ID         StreamID // IDExplicit: full ID; IDAutoSeq: only Ms
+	Trim       *StreamTrim
 }
 
 // ---- hashes ----

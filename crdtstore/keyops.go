@@ -76,6 +76,8 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 			}
 		}
 		return s.deleteMeta(ctx, db, key)
+	case core.TypeStream:
+		return s.deleteStream(ctx, db, key)
 	default:
 		// Types whose deletion lands in a later phase. Until then no data of
 		// these types exists; tombstone meta so the key reads as absent.
@@ -184,6 +186,8 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 			}
 		}
 		return s.writeMeta(ctx, db, newKey, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeList}})
+	case core.TypeStream:
+		return s.copyStream(ctx, db, key, newKey)
 	default:
 		return fmt.Errorf("crdtstore: RENAME of type %s not yet supported", k.TypeName())
 	}

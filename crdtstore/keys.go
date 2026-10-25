@@ -109,6 +109,28 @@ func bitSlot(db int, key string, chunk int, replica string) ds.Key {
 	return ds.NewKey(bitChunkBase(db, key, chunk) + encSeg(replica))
 }
 
+// streamBase / streamSlot hold stream entries as per-replica LWW slots keyed by
+// ID (ms and seq as fixed-width hex so lexicographic order is numeric):
+// /{P}/d/{db}/{key}/x/{ms:%016x}-{seq:%016x}/{replicaID}
+// streamLastBase / streamLastSlot hold each replica's highest known ID, a
+// max-merged register used to mint monotonic IDs and to define existence.
+// /{P}/d/{db}/{key}/xl/{replicaID}
+func streamBase(db int, key string) string {
+	return fmt.Sprintf("%s/d/%d/%s/x/", part(db, key), db, encSeg(key))
+}
+
+func streamSlot(db int, key string, ms, seq uint64, replica string) ds.Key {
+	return ds.NewKey(fmt.Sprintf("%s%016x-%016x/%s", streamBase(db, key), ms, seq, encSeg(replica)))
+}
+
+func streamLastBase(db int, key string) string {
+	return fmt.Sprintf("%s/d/%d/%s/xl/", part(db, key), db, encSeg(key))
+}
+
+func streamLastSlot(db int, key, replica string) ds.Key {
+	return ds.NewKey(streamLastBase(db, key) + encSeg(replica))
+}
+
 // hashBase / hashFieldBase / hashSlot hold per-field, per-replica LWW slots:
 // /{P}/d/{db}/{key}/h/{field}/{replicaID}
 func hashBase(db int, key string) string {

@@ -112,6 +112,20 @@ type RZSet interface {
 	UnionStore(dest string, aggregate string, keys ...string) (int, error)
 }
 
+// RStream is the stream (append-only, HLC-ordered log) storage interface.
+type RStream interface {
+	// Add appends an entry; ok=false when NoMkStream and the stream is absent.
+	Add(key string, opts restypes.StreamAddOpts, fields [][]byte) (id restypes.StreamID, ok bool, err error)
+	Len(key string) (int, error)
+	// Range returns live entries with lo <= ID <= hi in ascending order, or
+	// descending when rev; count <= 0 means unlimited.
+	Range(key string, lo, hi restypes.StreamBound, count int, rev bool) ([]restypes.StreamEntry, error)
+	Del(key string, ids ...restypes.StreamID) (int, error)
+	Trim(key string, t restypes.StreamTrim) (int, error)
+	// LastID is the highest ID ever added (0-0 if none), as `$` in XREAD.
+	LastID(key string) (restypes.StreamID, error)
+}
+
 // RList is the list (fractional-index sequence) storage interface.
 type RList interface {
 	Delete(key string, elem any) (int, error)
@@ -134,22 +148,24 @@ type RList interface {
 // Redka bundles the six storage interfaces and is passed to every command's
 // Run method. The wiring layer constructs it from a crdtstore backend.
 type Redka struct {
-	str  RStr
-	key  RKey
-	hash RHash
-	set  RSet
-	zset RZSet
-	list RList
+	str    RStr
+	key    RKey
+	hash   RHash
+	set    RSet
+	zset   RZSet
+	list   RList
+	stream RStream
 }
 
 // New builds a Redka from the six backend repositories.
-func New(str RStr, key RKey, hash RHash, set RSet, zset RZSet, list RList) Redka {
-	return Redka{str: str, key: key, hash: hash, set: set, zset: zset, list: list}
+func New(str RStr, key RKey, hash RHash, set RSet, zset RZSet, list RList, stream RStream) Redka {
+	return Redka{str: str, key: key, hash: hash, set: set, zset: zset, list: list, stream: stream}
 }
 
-func (r Redka) Str() RStr   { return r.str }
-func (r Redka) Key() RKey   { return r.key }
-func (r Redka) Hash() RHash { return r.hash }
-func (r Redka) Set() RSet   { return r.set }
-func (r Redka) ZSet() RZSet { return r.zset }
-func (r Redka) List() RList { return r.list }
+func (r Redka) Str() RStr       { return r.str }
+func (r Redka) Key() RKey       { return r.key }
+func (r Redka) Hash() RHash     { return r.hash }
+func (r Redka) Set() RSet       { return r.set }
+func (r Redka) ZSet() RZSet     { return r.zset }
+func (r Redka) List() RList     { return r.list }
+func (r Redka) Stream() RStream { return r.stream }

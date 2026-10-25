@@ -13,6 +13,7 @@ import (
 	"github.com/redis-geo/redgeo/command/list"
 	"github.com/redis-geo/redgeo/command/server"
 	"github.com/redis-geo/redgeo/command/set"
+	"github.com/redis-geo/redgeo/command/stream"
 	str "github.com/redis-geo/redgeo/command/string"
 	"github.com/redis-geo/redgeo/command/zset"
 	redis "github.com/redis-geo/redgeo/redisapi"
@@ -226,6 +227,22 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return geo.ParseGeoSearch(b)
 	case "geosearchstore":
 		return geo.ParseGeoSearchStore(b)
+
+	// stream
+	case "xadd":
+		return stream.ParseXAdd(b)
+	case "xlen":
+		return stream.ParseXLen(b)
+	case "xrange":
+		return stream.ParseXRange(b, false)
+	case "xrevrange":
+		return stream.ParseXRange(b, true)
+	case "xdel":
+		return stream.ParseXDel(b)
+	case "xtrim":
+		return stream.ParseXTrim(b)
+	case "xread":
+		return stream.ParseXRead(b)
 
 	// sorted set
 	case "zadd":
