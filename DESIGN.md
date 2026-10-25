@@ -23,7 +23,7 @@ implementation.
 
 ### Non-goals (initially)
 - Strong consistency, linearizability, or `WATCH`/CAS optimistic locking.
-- Redis Cluster slot protocol, scripting (`EVAL`), stream consumer groups, JSON. (redka
+- Redis Cluster slot protocol, stream consumer groups, JSON. (redka
   doesn't have these either.) HyperLogLog, bitmaps and geo were added later:
   HLL as per-replica max-merged sketches, bitmaps as per-chunk LWW slots (a
   concurrent flip inside the same 512-byte chunk can be lost), geo as a zset of
@@ -479,7 +479,7 @@ stats (heads, max height, queued jobs via `InternalStats`).
 | **1 — conflict-free correct** | Converges with intuitive HLC-LWW / OR-Set / counter semantics | strings, hashes, sets, counters (dedicated), keys/scan, server |
 | **2 — converges, weaker semantics** | Eventually consistent; some ops race | zsets, lists, TTL, NX/XX existence checks |
 | **3 — best-effort / degraded** | No isolation/rollback/CAS | MULTI/EXEC, `*STORE` |
-| **out** | Not implemented | WATCH, scripting, stream consumer groups, JSON, cluster |
+| **out** | Not implemented | WATCH, stream consumer groups, JSON, cluster |
 
 Estimated: **~60–70%** of common string/hash/set/key surface with *correct*
 active/active semantics; **~15%** more with documented weaker semantics.
@@ -704,6 +704,26 @@ so concurrent `XADD`s never write the same key. Deviations and costs:
 - `XREAD BLOCK` polls the store (20 ms) and caps `BLOCK 0` at one minute.
 - Consumer groups (`XGROUP`, `XREADGROUP`, `XACK`, `XPENDING`, `XCLAIM`) are not
   implemented: delivery/ack state is not conflict-free.
+
+### 12.3c Lua scripting
+`EVAL`/`EVALSHA`/`EVAL_RO`/`SCRIPT LOAD|EXISTS|FLUSH` run scripts in a sandboxed
+gopher-lua VM (`script/`, `command/script/`): base, table, string and math
+libraries plus a small `cjson`; no `os`/`io`/`require`/`dofile`. `redis.call` /
+`redis.pcall` dispatch through the normal command layer with Redis' Lua↔RESP
+conversion rules. Semantics:
+- Scripts run **only on the node that received them**; their effects replicate
+  as ordinary CRDT writes. They are never replayed, so — unlike CRDB — no
+  determinism restrictions apply (`TIME`, `math.random` are fine).
+- Like `EXEC`, an `EVAL` runs on a transaction-bound store: its writes commit as
+  one batch with read-your-writes, with **no isolation from other connections and
+  no rollback** if the script errors partway (Redis also keeps partial effects).
+  Under `MULTI` the script is queued and runs at `EXEC`.
+- A script is aborted after 5 s (`Timeout`); there is no `SCRIPT KILL`
+  (it replies `NOTBUSY`) and no `lua-time-limit` knob.
+- The script cache is per node, as in Redis; clients recover from `NOSCRIPT` by
+  reloading. `redis.call` rejects connection/transaction commands, `PUBLISH` and
+  nested `EVAL`; there is no `SCRIPT DEBUG`, `FUNCTION`, `bit`, `struct` or
+  `cmsgpack`.
 
 ### 12.4 RESP3 — fully supported via the forked redcon *(resolved)*
 HELLO negotiates RESP2/RESP3; under proto 3 the connection emits native RESP3

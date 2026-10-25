@@ -11,6 +11,7 @@ import (
 	"github.com/redis-geo/redgeo/command/hash"
 	"github.com/redis-geo/redgeo/command/key"
 	"github.com/redis-geo/redgeo/command/list"
+	"github.com/redis-geo/redgeo/command/script"
 	"github.com/redis-geo/redgeo/command/server"
 	"github.com/redis-geo/redgeo/command/set"
 	"github.com/redis-geo/redgeo/command/stream"
@@ -18,6 +19,8 @@ import (
 	"github.com/redis-geo/redgeo/command/zset"
 	redis "github.com/redis-geo/redgeo/redisapi"
 )
+
+func init() { script.Dispatch = Parse }
 
 // Parse parses a raw RESP argument list into a Cmd.
 func Parse(args [][]byte) (redis.Cmd, error) {
@@ -227,6 +230,14 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return geo.ParseGeoSearch(b)
 	case "geosearchstore":
 		return geo.ParseGeoSearchStore(b)
+
+	// scripting
+	case "eval", "eval_ro":
+		return script.ParseEval(b, false)
+	case "evalsha", "evalsha_ro":
+		return script.ParseEval(b, true)
+	case "script":
+		return script.ParseScript(b)
 
 	// stream
 	case "xadd":

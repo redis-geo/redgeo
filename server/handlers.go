@@ -81,6 +81,19 @@ func (h *handler) serve(conn redcon.Conn, rcmd redcon.Command) {
 
 	// The redcon connection natively encodes RESP3 types when its protocol was
 	// set to 3 at HELLO (conn.SetProto), so it is passed directly as the Writer.
+	// EVAL runs on a transaction-bound store like EXEC, so a script's writes
+	// commit as one batch with read-your-writes (no isolation/rollback).
+	if strings.HasPrefix(name, "eval") {
+		stx, commit, err := h.store.BeginTxn(context.Background())
+		if err != nil {
+			conn.WriteError("ERR " + err.Error())
+			return
+		}
+		_, _ = pcmd.Run(conn, stx.Redka(st.db))
+		_ = commit() // best effort, as in EXEC
+		return
+	}
+
 	red := h.store.Redka(st.db)
 	_, _ = pcmd.Run(conn, red)
 }
