@@ -790,6 +790,19 @@ top of the merged value. Weights may be negative (estimates are clamped at 0).
 `INITBYPROB` uses `width = ⌈2/ε⌉`, `depth = ⌈log₂(1/δ)⌉`. Each `INCRBY` reads
 and rewrites `depth` cells (one small key each), so it costs O(depth) queries.
 
+**Top-k** (`TOPK.RESERVE/ADD/INCRBY/QUERY/COUNT/LIST/INFO`) deviates from
+RedisBloom's algorithm on purpose. RedisBloom uses HeavyKeeper, whose
+probabilistic exponential decay is neither commutative nor mergeable, so it
+cannot converge across replicas. redgeo keeps a **Space-Saving summary per
+replica** (`m = max(4k, 32)` items with count and error) and a read sums the
+replicas' counts and ranks the result — deterministic and independent of arrival
+order. Consequences: counts are over-estimates (by at most the item's recorded
+error, summed over replicas); any item whose true frequency exceeds N/m is always
+tracked; `TOPK.ADD`/`INCRBY` reply with the item pushed out of the top-k by that
+update, judged against the merged view this replica currently has; and the
+`width`/`depth`/`decay` arguments are stored and reported by `TOPK.INFO` but do
+not size anything. `TOPK.LIST` returns only occupied slots.
+
 ### 12.3b Streams: IDs, existence, cost
 Streams (`XADD/XLEN/XRANGE/XREVRANGE/XREAD/XDEL/XTRIM`) store each entry as a
 per-replica HLC-LWW slot keyed by ID (`/d/{db}/{key}/x/{ms}-{seq}/{replica}`),

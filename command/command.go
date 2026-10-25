@@ -303,6 +303,22 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 	case "cms.info":
 		return sketchcmd.ParseCMSInfo(b)
 
+	// top-k
+	case "topk.reserve":
+		return sketchcmd.ParseTopKReserve(b)
+	case "topk.add":
+		return sketchcmd.ParseTopKAdd(b)
+	case "topk.incrby":
+		return sketchcmd.ParseTopKIncrBy(b)
+	case "topk.query":
+		return sketchcmd.ParseTopKQuery(b, false)
+	case "topk.count":
+		return sketchcmd.ParseTopKQuery(b, true)
+	case "topk.list":
+		return sketchcmd.ParseTopKList(b)
+	case "topk.info":
+		return sketchcmd.ParseTopKInfo(b)
+
 	// scripting
 	case "eval", "eval_ro":
 		return script.ParseEval(b, false)

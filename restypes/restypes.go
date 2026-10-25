@@ -156,6 +156,18 @@ type BloomInfo struct {
 	Expansion int // 0 = non-scaling
 }
 
+// TopKEntry is an item with its estimated count.
+type TopKEntry struct {
+	Item  []byte
+	Count int64
+}
+
+// TopKInfo describes a top-k sketch (TOPK.INFO).
+type TopKInfo struct {
+	K, Width, Depth int
+	Decay           float64
+}
+
 // ---- hashes ----
 
 // HashItem is a single field/value pair of a hash.

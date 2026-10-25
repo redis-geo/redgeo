@@ -195,6 +195,17 @@ type RSketch interface {
 	// share dest's dimensions, else ErrCMSDims).
 	CMSMerge(dest string, srcs []string, weights []int64) error
 	CMSInfo(key string) (width, depth int, count int64, err error)
+
+	// TopKReserve creates a top-k sketch tracking the k heaviest items.
+	TopKReserve(key string, k, width, depth int, decay float64) error
+	// TopKAdd adds incs[i] occurrences of items[i] and reports, per item, the
+	// item pushed out of the top-k (nil if none). core.ErrNotFound if missing.
+	TopKAdd(key string, items [][]byte, incs []int64) ([][]byte, error)
+	TopKQuery(key string, items [][]byte) ([]bool, error)
+	TopKCount(key string, items [][]byte) ([]int64, error)
+	// TopKList returns the top-k items, heaviest first.
+	TopKList(key string) ([]restypes.TopKEntry, error)
+	TopKInfo(key string) (restypes.TopKInfo, error)
 }
 
 // ErrCMSDims is returned when merged count-min sketches differ in size.

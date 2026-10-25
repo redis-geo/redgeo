@@ -148,6 +148,8 @@ func (s *Store) copySketch(ctx context.Context, db int, key, newKey string) erro
 		return s.copyBloom(ctx, sp, np)
 	case skCMS:
 		return s.copyCMS(ctx, sp, np)
+	case skTopK:
+		return s.copyTopK(ctx, sp, np)
 	}
 	return fmt.Errorf("crdtstore: RENAME of sketch kind %d not supported", sp.kind)
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/redis-geo/redgeo/crdtstore"
 	"github.com/redis-geo/redgeo/engine"
+	"github.com/redis-geo/redgeo/restypes"
 	"github.com/redis-geo/redgeo/rotation"
 )
 
@@ -432,4 +433,89 @@ func TestInDoubtResolution(t *testing.T) {
 			eventually(t, "r1 data", func() bool { return members(rs[1], "s")["x"] && members(rs[1], "s")["after"] })
 		})
 	}
+}
+
+// Every data structure survives a cluster-wide compaction: the new generation is
+// rebuilt from live keys, so each type's components must be plain live keys.
+func TestCompactionKeepsAllTypes(t *testing.T) {
+	rs, _ := newCluster(t, 2, 4, true)
+	waitMembers(t, rs)
+	a, b := rs[0].st.Redka(0), rs[1].st.Redka(0)
+	items := func(n int) [][]byte {
+		var out [][]byte
+		for i := 0; i < n; i++ {
+			out = append(out, []byte(fmt.Sprintf("it%d", i)))
+		}
+		return out
+	}
+
+	a.Str().PFAdd("hll", items(500)...)
+	a.Sketch().BFAdd("bf", items(200), &restypes.BloomOpts{ErrorRate: 0.01, Capacity: 100, Expansion: 2})
+	a.Sketch().CMSInit("cms", 500, 4)
+	a.Sketch().CMSIncr("cms", [][]byte{[]byte("x"), []byte("y")}, []int64{7, 3})
+	b.Sketch().TopKReserve("topk", 2, 8, 7, 0.9)
+	b.Sketch().TopKAdd("topk", [][]byte{[]byte("p"), []byte("q"), []byte("r")}, []int64{9, 5, 1})
+	a.Stream().Add("st", restypes.StreamAddOpts{Mode: restypes.IDExplicit, ID: restypes.StreamID{Ms: 5, Seq: 1}}, [][]byte{[]byte("f"), []byte("v")})
+	a.Stream().GroupCreate("st", "g", restypes.StreamID{}, false)
+	b.Str().Set("plain", "v")
+	a.Set().Add("set", "m1", "m2")
+
+	check := func(r *replica) bool {
+		rd := r.st.Redka(0)
+		if n, _ := rd.Str().PFCount("hll"); n < 470 || n > 530 {
+			return false
+		}
+		if found, _ := rd.Sketch().BFExists("bf", items(200)); !allTrue(found) {
+			return false
+		}
+		if q, err := rd.Sketch().CMSQuery("cms", [][]byte{[]byte("x"), []byte("y")}); err != nil || q[0] != 7 || q[1] != 3 {
+			return false
+		}
+		if l, _ := rd.Sketch().TopKList("topk"); len(l) != 2 || string(l[0].Item) != "p" || string(l[1].Item) != "q" {
+			return false
+		}
+		if n, _ := rd.Stream().Len("st"); n != 1 {
+			return false
+		}
+		if gs, _ := rd.Stream().Groups("st"); len(gs) != 1 {
+			return false
+		}
+		v, err := rd.Str().Get("plain")
+		return err == nil && v.String() == "v" && len(members(r, "set")) == 2
+	}
+	for _, r := range rs {
+		r := r
+		eventually(t, r.id+" converged before compaction", func() bool { return check(r) })
+	}
+	if err := rs[0].node.CompactAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for p := 0; p < 4; p++ {
+		for i, g := range gens(rs, p) {
+			if g != 1 {
+				t.Fatalf("partition %d r%d generation = %d", p, i, g)
+			}
+		}
+	}
+	for _, r := range rs {
+		r := r
+		eventually(t, r.id+" intact after compaction", func() bool { return check(r) })
+	}
+	// And they keep accepting writes on the new generation.
+	if _, err := b.Sketch().CMSIncr("cms", [][]byte{[]byte("x")}, []int64{1}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "post-compaction write replicates", func() bool {
+		q, _ := a.Sketch().CMSQuery("cms", [][]byte{[]byte("x")})
+		return len(q) == 1 && q[0] == 8
+	})
+}
+
+func allTrue(bs []bool) bool {
+	for _, b := range bs {
+		if !b {
+			return false
+		}
+	}
+	return true
 }
