@@ -25,6 +25,7 @@ type MemNetwork struct {
 	parts       int
 	inboxes     [][]chan []byte // [node][partition]
 	partitioned []bool          // [node] — isolates a node across all partitions
+	bus         []chan []byte   // [node] — geo pub/sub inbox
 }
 
 // NewMemNetwork builds an n-node single-DAG network: the control handle, one
@@ -47,8 +48,10 @@ func NewMemNetworkP(nodes, parts int) (*MemNetwork, []BroadcasterFactory, ipld.D
 		parts:       parts,
 		inboxes:     make([][]chan []byte, nodes),
 		partitioned: make([]bool, nodes),
+		bus:         make([]chan []byte, nodes),
 	}
 	for i := 0; i < nodes; i++ {
+		net.bus[i] = make(chan []byte, 1024)
 		net.inboxes[i] = make([]chan []byte, parts)
 		for p := 0; p < parts; p++ {
 			net.inboxes[i][p] = make(chan []byte, 1024)
@@ -71,6 +74,43 @@ func (net *MemNetwork) SetPartitioned(i int, p bool) {
 	net.mu.Lock()
 	net.partitioned[i] = p
 	net.mu.Unlock()
+}
+
+// Bus returns node i's geo pub/sub channel (separate from the CRDT gossip),
+// honouring SetPartitioned.
+func (net *MemNetwork) Bus(i int) crdt.Broadcaster { return &memBus{net: net, node: i} }
+
+type memBus struct {
+	net  *MemNetwork
+	node int
+}
+
+func (b *memBus) Broadcast(_ context.Context, payload []byte) error {
+	net := b.net
+	net.mu.RLock()
+	defer net.mu.RUnlock()
+	if net.partitioned[b.node] {
+		return nil
+	}
+	for i := 0; i < net.nodes; i++ {
+		if i == b.node || net.partitioned[i] {
+			continue
+		}
+		select {
+		case net.bus[i] <- append([]byte(nil), payload...):
+		default:
+		}
+	}
+	return nil
+}
+
+func (b *memBus) Next(ctx context.Context) ([]byte, error) {
+	select {
+	case <-ctx.Done():
+		return nil, crdt.ErrNoMoreBroadcast
+	case p := <-b.net.bus[b.node]:
+		return p, nil
+	}
 }
 
 func (net *MemNetwork) broadcast(fromNode, part int, payload []byte) {

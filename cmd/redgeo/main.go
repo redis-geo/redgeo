@@ -39,6 +39,7 @@ func main() {
 	}
 
 	cfg := engine.Config{PebbleDir: pebbleDir}
+	var bus server.Bus // geo pub/sub, only with -p2p
 
 	// Multi-node mode: stand up the libp2p mesh and derive the replica ID from
 	// the peer identity (DESIGN §7, §8).
@@ -62,6 +63,9 @@ func main() {
 		}
 		defer cl.Close()
 		cfg.DAGService = cl.DAGService
+		if cl.Bus != nil {
+			bus = cl.Bus
+		}
 		cfg.RebroadcastInterval = 5 * time.Second
 		cfg.ReplicaID = cl.ReplicaID
 		cfg.NumPartitions = *partitions
@@ -95,6 +99,9 @@ func main() {
 	defer sweeper.Stop()
 
 	srv := server.New(*addr, store)
+	if bus != nil {
+		srv.SetBus(bus, rid)
+	}
 
 	ready := make(chan error, 1)
 	go func() {

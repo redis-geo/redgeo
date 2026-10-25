@@ -466,9 +466,9 @@ stats (heads, max height, queued jobs via `InternalStats`).
 
 ### 6.12 Pub/Sub (Tier 4, two modes)
 - **Local pub/sub:** redcon's built-in `PubSub` (works out of the box).
-- **Geo pub/sub:** publish across replicas over a dedicated libp2p gossipsub
-  topic (separate from the CRDT data topic), or via `PutHook`-driven keyspace
-  notifications. v1: local only; geo as a follow-up.
+- **Geo pub/sub (implemented, §12.5):** with `-p2p`, publish across replicas
+  over a dedicated libp2p gossipsub topic (separate from the CRDT data topics).
+  `PutHook`-driven keyspace notifications remain a possible follow-up.
 
 ### Coverage summary
 | Tier | Behavior | Commands |
@@ -695,11 +695,15 @@ the RESP2 encoding). This supersedes the earlier "scalar-only / no push"
 limitation. Like the go-ds-crdt fork, the redcon fork is a `replace`-to-local
 dependency (§12.6) that must be pinned for CI.
 
-### 12.5 Pub/sub is local-only
-`(P)SUBSCRIBE`/`PUBLISH` work within a single node via redcon's built-in PubSub
-(§6.12). **Geo pub/sub** — propagating messages across replicas over a dedicated
-gossipsub topic — is not wired; a publish on one node is not seen by subscribers
-on another.
+### 12.5 Geo pub/sub is at-most-once *(resolved)*
+With `-p2p`, `PUBLISH` is also broadcast on a dedicated gossipsub topic
+(`redgeo/pubsub/v1`, separate from the CRDT data topics) and delivered to the
+local `(P)SUBSCRIBE`rs of every other replica (`server/bus.go`). Semantics match
+Redis pub/sub, not the CRDT store: delivery is **at-most-once** (nothing is
+persisted, so a partitioned or restarted node misses messages) and unordered
+across publishers, and `PUBLISH` replies with the **local** subscriber count
+only. Each frame carries its origin replica ID so a node drops gossipsub's echo
+of its own messages. Without `-p2p` pub/sub stays node-local.
 
 ### 12.6 Fork dependencies are not merged/pinned
 redgeo consumes **two redis-geo forks** via `replace` to local paths for

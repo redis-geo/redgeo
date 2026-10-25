@@ -18,6 +18,9 @@ import (
 type handler struct {
 	store *crdtstore.Store
 	ps    *redcon.PubSub
+
+	bus    Bus    // optional: geo pub/sub (bus.go)
+	origin string // this replica, to drop our own bus echoes
 }
 
 func newHandler(store *crdtstore.Store) *handler {
@@ -165,7 +168,8 @@ func (h *handler) doPublish(conn redcon.Conn, args [][]byte) {
 		conn.WriteError(redis.ErrInvalidArgNum.Error() + " (publish)")
 		return
 	}
-	n := h.ps.Publish(string(args[1]), string(args[2]))
+	n := h.ps.Publish(string(args[1]), string(args[2])) // local subscribers
+	h.publishRemote(string(args[1]), string(args[2]))
 	conn.WriteInt(n)
 }
 

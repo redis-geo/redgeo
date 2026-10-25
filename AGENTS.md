@@ -87,4 +87,4 @@ Phases 0–9 of DESIGN §9 are implemented plus all originally-deferred items.
 Known residual limitations (deliberate trade-offs, not bugs) are in **DESIGN
 §12** — read it before assuming something is broken (e.g. cross-partition MULTI
 is intentionally not atomic across partitions; collection HSCAN/SSCAN/ZSCAN are
-single-page; geo pub/sub is local-only).
+single-page; geo pub/sub is at-most-once and PUBLISH counts local subscribers only).

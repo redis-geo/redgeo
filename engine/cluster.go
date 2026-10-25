@@ -19,6 +19,9 @@ import (
 // dataTopic is the gossipsub topic CRDT deltas are published on.
 const dataTopic = "redgeo/crdt/v1"
 
+// busTopic carries PUBLISH messages between replicas.
+const busTopic = "redgeo/pubsub/v1"
+
 // ClusterConfig configures the libp2p replication mesh (DESIGN §7).
 type ClusterConfig struct {
 	// ListenAddrs are libp2p multiaddrs to listen on (e.g.
@@ -41,8 +44,10 @@ type Cluster struct {
 	// named partition DAG gossips independently (DESIGN §5.5).
 	BroadcasterFactory func(p int) crdt.Broadcaster
 	DAGService         ipld.DAGService
-	ReplicaID          string // libp2p peer ID
-	closers            []func() error
+	// Bus is a separate gossipsub topic for geo pub/sub messages (DESIGN §12.5).
+	Bus       crdt.Broadcaster
+	ReplicaID string // libp2p peer ID
+	closers   []func() error
 }
 
 // NewCluster builds the libp2p host, DHT, gossipsub, IPFS-Lite DAG service, and
@@ -122,7 +127,14 @@ func NewCluster(ctx context.Context, cfg ClusterConfig) (*Cluster, error) {
 		return b
 	}
 
+	// Geo pub/sub bus; a failed join leaves pub/sub local-only.
+	var bus crdt.Broadcaster
+	if b, berr := crdt.NewPubSubBroadcaster(ctx, psub, busTopic); berr == nil {
+		bus = b
+	}
+
 	return &Cluster{
+		Bus:                bus,
 		Broadcaster:        bcast,
 		BroadcasterFactory: factory,
 		DAGService:         lite,
