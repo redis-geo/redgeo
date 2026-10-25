@@ -33,6 +33,7 @@ engine/          go-ds-crdt setup: partition DAG routing, Pebble/in-mem backing,
 crdtstore/       ★ the backend: the six R* impls + key codec, slots, meta, counters, locks, scan, txn, compaction
 rotation/        cluster-coordinated compaction protocol (freeze → converge → switch generation → purge)
 script/          sandboxed Lua VM behind EVAL/EVALSHA (command/script adapts it)
+jsondoc/         in-memory JSON tree + JSONPath (storage-independent; crdtstore/rjson.go persists it)
 ```
 
 ### Dependency direction (no import cycles)

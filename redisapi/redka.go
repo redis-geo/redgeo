@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/redis-geo/redgeo/core"
+	"github.com/redis-geo/redgeo/jsondoc"
 	"github.com/redis-geo/redgeo/restypes"
 )
 
@@ -126,6 +127,16 @@ type RStream interface {
 	LastID(key string) (restypes.StreamID, error)
 }
 
+// RJSON is the JSON document storage interface. A document is loaded into a
+// jsondoc.Doc, mutated by fn, and the difference is persisted.
+type RJSON interface {
+	// View runs fn over a snapshot; core.ErrNotFound if the key is absent.
+	View(key string, fn func(d *jsondoc.Doc) error) error
+	// Update runs fn under the key lock and persists changes. With create a
+	// missing key yields an empty document; otherwise core.ErrNotFound.
+	Update(key string, create bool, fn func(d *jsondoc.Doc) error) error
+}
+
 // RList is the list (fractional-index sequence) storage interface.
 type RList interface {
 	Delete(key string, elem any) (int, error)
@@ -155,11 +166,12 @@ type Redka struct {
 	zset   RZSet
 	list   RList
 	stream RStream
+	json   RJSON
 }
 
 // New builds a Redka from the six backend repositories.
-func New(str RStr, key RKey, hash RHash, set RSet, zset RZSet, list RList, stream RStream) Redka {
-	return Redka{str: str, key: key, hash: hash, set: set, zset: zset, list: list, stream: stream}
+func New(str RStr, key RKey, hash RHash, set RSet, zset RZSet, list RList, stream RStream, json RJSON) Redka {
+	return Redka{str: str, key: key, hash: hash, set: set, zset: zset, list: list, stream: stream, json: json}
 }
 
 func (r Redka) Str() RStr       { return r.str }
@@ -168,4 +180,5 @@ func (r Redka) Hash() RHash     { return r.hash }
 func (r Redka) Set() RSet       { return r.set }
 func (r Redka) ZSet() RZSet     { return r.zset }
 func (r Redka) List() RList     { return r.list }
+func (r Redka) JSON() RJSON     { return r.json }
 func (r Redka) Stream() RStream { return r.stream }

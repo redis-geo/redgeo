@@ -18,6 +18,7 @@ const (
 	TypeHash   = TypeID(4)
 	TypeZSet   = TypeID(5)
 	TypeStream = TypeID(6)
+	TypeJSON   = TypeID(7)
 )
 
 // Common errors returned by data structure methods.
@@ -64,6 +65,8 @@ func (k Key) TypeName() string {
 		return "zset"
 	case TypeStream:
 		return "stream"
+	case TypeJSON:
+		return "ReJSON-RL"
 	}
 	return "unknown"
 }

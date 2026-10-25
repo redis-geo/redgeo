@@ -65,6 +65,8 @@ func (s *Store) isLive(ctx context.Context, db int, key string, m metaEnvelope) 
 		return s.zsetAnyLive(ctx, db, key)
 	case core.TypeList:
 		return s.anyPrefix(ctx, listBase(db, key))
+	case core.TypeJSON:
+		return s.jsonAnyLive(ctx, db, key)
 	case core.TypeStream:
 		// Like Redis, a stream outlives its last entry: it exists while any
 		// replica has recorded a last-ID (deleted by DEL).

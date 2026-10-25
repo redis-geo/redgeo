@@ -41,6 +41,7 @@ engine/       go-ds-crdt setup: partition DAG routing, Pebble/in-mem, broadcaste
 crdtstore/    ★ the backend: six R* impls + key codec, slots, meta, counters, locks, scan, txn, compaction
 rotation/     cluster-coordinated compaction protocol (freeze → converge → switch generation → purge)
 script/       sandboxed Lua VM behind EVAL/EVALSHA (command/script adapts it)
+jsondoc/      in-memory JSON tree + JSONPath (storage-independent; crdtstore/rjson.go persists it)
 ```
 
 The command layer depends only on the six `redisapi.R*` interfaces. `crdtstore`

@@ -23,7 +23,7 @@ implementation.
 
 ### Non-goals (initially)
 - Strong consistency, linearizability, or `WATCH`/CAS optimistic locking.
-- Redis Cluster slot protocol, stream consumer groups, JSON. (redka
+- Redis Cluster slot protocol, stream consumer groups. (redka
   doesn't have these either.) HyperLogLog, bitmaps and geo were added later:
   HLL as per-replica max-merged sketches, bitmaps as per-chunk LWW slots (a
   concurrent flip inside the same 512-byte chunk can be lost), geo as a zset of
@@ -479,7 +479,7 @@ stats (heads, max height, queued jobs via `InternalStats`).
 | **1 — conflict-free correct** | Converges with intuitive HLC-LWW / OR-Set / counter semantics | strings, hashes, sets, counters (dedicated), keys/scan, server |
 | **2 — converges, weaker semantics** | Eventually consistent; some ops race | zsets, lists, TTL, NX/XX existence checks |
 | **3 — best-effort / degraded** | No isolation/rollback/CAS | MULTI/EXEC, `*STORE` |
-| **out** | Not implemented | WATCH, stream consumer groups, JSON, cluster |
+| **out** | Not implemented | WATCH, stream consumer groups, RediSearch/TimeSeries/Bloom, cluster |
 
 Estimated: **~60–70%** of common string/hash/set/key surface with *correct*
 active/active semantics; **~15%** more with documented weaker semantics.
@@ -761,6 +761,36 @@ conversion rules. Semantics:
   reloading. `redis.call` rejects connection/transaction commands, `PUBLISH` and
   nested `EVAL`; there is no `SCRIPT DEBUG`, `FUNCTION`, `bit`, `struct` or
   `cmsgpack`.
+
+### 12.3d JSON documents
+`JSON.SET/GET/MGET/MSET/DEL/FORGET/TYPE/NUMINCRBY/NUMMULTBY/STRAPPEND/STRLEN/
+ARRAPPEND/ARRINSERT/ARRPOP/ARRTRIM/ARRINDEX/ARRLEN/OBJKEYS/OBJLEN/TOGGLE/CLEAR`
+implement a RedisJSON subset. A document is a **tree of nodes, each a
+per-replica HLC-LWW slot keyed by its path** (`/d/{db}/{key}/j/{seg}/…/_/{replica}`;
+a segment is `f`+name for an object field or `a`+posKey for an array element,
+using the list's order-preserving position keys). Because different paths are
+different keys, concurrent edits to *different* parts of one document merge;
+edits to the *same* path are last-writer-wins by HLC, like any register.
+Commands load the document into the pure `jsondoc` tree, mutate it under the key
+lock, and the backend persists only the difference (changed/new nodes as
+present slots, vanished nodes as deleted-tagged slots — so a replaced or deleted
+subtree cannot reappear when the node is re-created).
+- **Concurrent array edits** merge element-wise (each element has its own
+  identity); index-based operations (`ARRPOP i`, `ARRINSERT i`, `ARRTRIM`) race
+  before convergence, as list index ops do (§6.5).
+- **Concurrent delete vs. edit inside the deleted subtree:** the delete wins the
+  nodes it saw; a node the deleter never saw survives under a deleted parent and
+  stays hidden while the parent is gone.
+- **`NUMINCRBY`/`NUMMULTBY` are LWW read-modify-write**, not PN-counters:
+  concurrent increments of one number on different replicas lose one. Use a
+  counter key (`INCR`/`HINCRBY`) where increments must sum.
+- **Paths:** `$`, `.name`, `['name']`, `[n]`, `[-n]`, `.*`, `[*]`, `..name`,
+  `..*`, plus legacy `.a.b`/`a.b`. Not supported: filters `[?()]`, slices
+  `[a:b]`, unions, `JSON.RESP`, `JSON.DEBUG`, `JSON.MERGE`, and `JSON.GET`
+  formatting options (accepted, ignored). Object fields are returned sorted by
+  name (insertion order is not kept); numbers are preserved verbatim.
+- **Cost:** every command reads the whole document (O(size)); `TYPE` reports
+  `ReJSON-RL`.
 
 ### 12.4 RESP3 — fully supported via the forked redcon *(resolved)*
 HELLO negotiates RESP2/RESP3; under proto 3 the connection emits native RESP3

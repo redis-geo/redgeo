@@ -9,6 +9,7 @@ import (
 	"github.com/redis-geo/redgeo/command/conn"
 	"github.com/redis-geo/redgeo/command/geo"
 	"github.com/redis-geo/redgeo/command/hash"
+	jsoncmd "github.com/redis-geo/redgeo/command/json"
 	"github.com/redis-geo/redgeo/command/key"
 	"github.com/redis-geo/redgeo/command/list"
 	"github.com/redis-geo/redgeo/command/script"
@@ -230,6 +231,40 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return geo.ParseGeoSearch(b)
 	case "geosearchstore":
 		return geo.ParseGeoSearchStore(b)
+
+	// JSON (RedisJSON subset)
+	case "json.set":
+		return jsoncmd.ParseSet(b)
+	case "json.mset":
+		return jsoncmd.ParseMSet(b)
+	case "json.get":
+		return jsoncmd.ParseGet(b)
+	case "json.mget":
+		return jsoncmd.ParseMGet(b)
+	case "json.del", "json.forget":
+		return jsoncmd.ParseDel(b)
+	case "json.type", "json.strlen", "json.arrlen", "json.objlen", "json.objkeys":
+		return jsoncmd.ParseQuery(b, strings.TrimPrefix(name, "json."))
+	case "json.numincrby":
+		return jsoncmd.ParseNumOp(b, false)
+	case "json.nummultby":
+		return jsoncmd.ParseNumOp(b, true)
+	case "json.toggle":
+		return jsoncmd.ParseToggle(b)
+	case "json.clear":
+		return jsoncmd.ParseClear(b)
+	case "json.strappend":
+		return jsoncmd.ParseStrAppend(b)
+	case "json.arrappend":
+		return jsoncmd.ParseArrAppend(b)
+	case "json.arrinsert":
+		return jsoncmd.ParseArrInsert(b)
+	case "json.arrpop":
+		return jsoncmd.ParseArrPop(b)
+	case "json.arrtrim":
+		return jsoncmd.ParseArrTrim(b)
+	case "json.arrindex":
+		return jsoncmd.ParseArrIndex(b)
 
 	// scripting
 	case "eval", "eval_ro":
