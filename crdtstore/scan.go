@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/tidwall/match"
 )
 
 // defaultScanCount is the COUNT hint used when a client omits it.
@@ -142,4 +144,49 @@ func keyNameFromMeta(metaKey, prefix string) string {
 		return ""
 	}
 	return name
+}
+
+// scanPage pages through one collection's members for HSCAN/SSCAN/ZSCAN
+// (DESIGN §6.9, §12.3). names must be sorted ascending; ordering by member
+// name (not score/insertion) keeps resume positions stable under concurrent
+// writes. The cursor is a token in the same per-node resume table as SCAN,
+// holding the last member returned, so every member present for the whole scan
+// is returned at least once. COUNT bounds matching members per page; each page
+// still reads the whole collection (O(n)), it just bounds the reply. An unknown
+// or expired cursor restarts from the beginning, as keyspace SCAN does.
+// It returns the indexes into names of this page's matches and the next
+// cursor (0 = done).
+func (s *Store) scanPage(db int, key string, cursor, count int, pattern string, names []string) ([]int, int) {
+	if count <= 0 {
+		count = defaultScanCount
+	}
+	start := 0
+	if cursor != 0 {
+		if e, ok := s.resume.get(uint64(cursor)); ok && e.scopeKey == key && e.db == db {
+			start = sort.SearchStrings(names, e.last)
+			if start < len(names) && names[start] == e.last {
+				start++
+			}
+		}
+	}
+	var page []int
+	last := -1
+	for i := start; i < len(names); i++ {
+		if pattern != "" && pattern != "*" && !match.Match(names[i], pattern) {
+			continue
+		}
+		page = append(page, i)
+		last = i
+		if len(page) >= count {
+			break
+		}
+	}
+	if cursor != 0 {
+		s.resume.free(uint64(cursor))
+	}
+	if last < 0 || len(page) < count || last == len(names)-1 {
+		return page, 0 // fewer than COUNT matches left, or nothing after the last
+	}
+	tok := s.resume.alloc(&resumeEntry{db: db, scopeKey: key, last: names[last]})
+	return page, int(tok)
 }

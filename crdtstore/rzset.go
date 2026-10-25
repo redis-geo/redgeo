@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tidwall/match"
-
 	"github.com/redis-geo/redgeo/core"
 	"github.com/redis-geo/redgeo/restypes"
 )
@@ -345,18 +343,21 @@ func (r zsetRepo) Scan(key string, cursor int, pattern string, count int) (resty
 	if err := r.ensureZSetType(ctx, key); err != nil {
 		return restypes.ZScanResult{}, err
 	}
-	items, err := r.sortedItems(ctx, key)
+	scores, err := r.s.zsetLiveScores(ctx, r.db, key)
 	if err != nil {
 		return restypes.ZScanResult{}, err
 	}
-	var out []restypes.ZSetItem
-	for _, it := range items {
-		if pattern != "" && pattern != "*" && !match.Match(string(it.Elem), pattern) {
-			continue
-		}
-		out = append(out, it)
+	names := make([]string, 0, len(scores))
+	for m := range scores {
+		names = append(names, m)
 	}
-	return restypes.ZScanResult{Cursor: 0, Items: out}, nil
+	sort.Strings(names)
+	idx, next := r.s.scanPage(r.db, key, cursor, count, pattern, names)
+	out := make([]restypes.ZSetItem, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, restypes.ZSetItem{Elem: core.Value(names[i]), Score: scores[names[i]]})
+	}
+	return restypes.ZScanResult{Cursor: next, Items: out}, nil
 }
 
 // ---- set algebra over zsets (aggregate sum/min/max) ----

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	ds "github.com/ipfs/go-datastore"
-	"github.com/tidwall/match"
 
 	"github.com/redis-geo/redgeo/core"
 	"github.com/redis-geo/redgeo/restypes"
@@ -507,12 +506,10 @@ func (r hashRepo) Scan(key string, cursor int, pattern string, count int) (resty
 		fields = append(fields, f)
 	}
 	sort.Strings(fields)
-	var out []restypes.HashItem
-	for _, f := range fields {
-		if pattern != "" && pattern != "*" && !match.Match(f, pattern) {
-			continue
-		}
-		out = append(out, restypes.HashItem{Field: f, Value: items[f]})
+	idx, next := r.s.scanPage(r.db, key, cursor, count, pattern, fields)
+	out := make([]restypes.HashItem, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, restypes.HashItem{Field: fields[i], Value: items[fields[i]]})
 	}
-	return restypes.HashScanResult{Cursor: 0, Items: out}, nil
+	return restypes.HashScanResult{Cursor: next, Items: out}, nil
 }

@@ -676,11 +676,14 @@ approximation**: it refuses to cut until every expected replica is observed
 per-partition rotation (the §5.5 "target") is built; cluster orchestration of it
 is the remaining work.
 
-### 12.3 `HSCAN`/`SSCAN`/`ZSCAN` return a single page
-The keyspace `SCAN` has a real resumable numeric cursor backed by a per-node
-`(partition, last-key)` resume table (§6.9). The collection scans return all
-elements of one key in a single page (cursor `0`). This is valid Redis SCAN
-behavior for a bounded single key, but large collections are not paginated.
+### 12.3 `HSCAN`/`SSCAN`/`ZSCAN` are paginated but O(n) per page *(resolved)*
+Collection scans use the same per-node resume table as keyspace `SCAN` (§6.9):
+the cursor token maps to the last member returned, with members ordered by name
+(not score or insertion) so resume positions survive concurrent writes. `COUNT`
+(default 10) bounds the matching members per page. Each page still reads the
+whole collection, so cost per page is O(n) in the collection size — the reply is
+bounded, the work is not. Cursors resolve only on the issuing node; an unknown
+or expired cursor restarts from the beginning.
 
 ### 12.4 RESP3 — fully supported via the forked redcon *(resolved)*
 HELLO negotiates RESP2/RESP3; under proto 3 the connection emits native RESP3

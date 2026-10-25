@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tidwall/match"
-
 	"github.com/redis-geo/redgeo/core"
 	"github.com/redis-geo/redgeo/restypes"
 )
@@ -369,14 +367,12 @@ func (r setRepo) Scan(key string, cursor int, pattern string, count int) (restyp
 	if err != nil {
 		return restypes.SetScanResult{}, err
 	}
-	var items []core.Value
-	for _, m := range mem {
-		if pattern != "" && pattern != "*" && !match.Match(m, pattern) {
-			continue
-		}
-		items = append(items, core.Value(m))
+	idx, next := r.s.scanPage(r.db, key, cursor, count, pattern, mem)
+	items := make([]core.Value, 0, len(idx))
+	for _, i := range idx {
+		items = append(items, core.Value(mem[i]))
 	}
-	return restypes.SetScanResult{Cursor: 0, Items: items}, nil
+	return restypes.SetScanResult{Cursor: next, Items: items}, nil
 }
 
 // helpers
