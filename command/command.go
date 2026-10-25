@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/redis-geo/redgeo/command/conn"
+	"github.com/redis-geo/redgeo/command/geo"
 	"github.com/redis-geo/redgeo/command/hash"
 	"github.com/redis-geo/redgeo/command/key"
 	"github.com/redis-geo/redgeo/command/list"
@@ -211,6 +212,20 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return list.ParseLTrim(b)
 	case "rpoplpush":
 		return list.ParseRPopLPush(b)
+
+	// geo (zset-backed)
+	case "geoadd":
+		return geo.ParseGeoAdd(b)
+	case "geopos":
+		return geo.ParseGeoPos(b)
+	case "geodist":
+		return geo.ParseGeoDist(b)
+	case "geohash":
+		return geo.ParseGeoHash(b)
+	case "geosearch":
+		return geo.ParseGeoSearch(b)
+	case "geosearchstore":
+		return geo.ParseGeoSearchStore(b)
 
 	// sorted set
 	case "zadd":
