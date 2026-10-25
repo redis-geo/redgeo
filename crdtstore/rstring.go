@@ -42,6 +42,12 @@ func (r strRepo) readValue(ctx context.Context, key string) (core.Value, error) 
 	switch m.Flavor {
 	case flavorHLL:
 		return nil, core.ErrKeyType // sketches are only reachable via PF* commands
+	case flavorBitmap:
+		d, err := r.s.bitmapLoad(ctx, r.db, key)
+		if err != nil {
+			return nil, err
+		}
+		return core.Value(d.bytes()), nil
 	case flavorCounter:
 		sum, err := r.s.counterSumInt(ctx, r.db, key)
 		if err != nil {
@@ -119,6 +125,11 @@ func (r strRepo) writeString(ctx context.Context, key string, b []byte, etimeMS 
 			live, _ = r.s.counterExists(ctx, r.db, key)
 		case m.Flavor == flavorHLL:
 			live, _ = r.s.anyPrefix(ctx, hllBase(r.db, key))
+		case m.Flavor == flavorBitmap:
+			// SET overwrites a bitmap: tombstone its chunks (HLC-fenced).
+			if err := r.s.deleteBitmap(ctx, r.db, key); err != nil {
+				return err
+			}
 		}
 		if live {
 			return core.ErrKeyType

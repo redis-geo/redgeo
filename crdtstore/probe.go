@@ -47,6 +47,10 @@ func (s *Store) isLive(ctx context.Context, db int, key string, m metaEnvelope) 
 		if m.Flavor == flavorHLL {
 			return s.anyPrefix(ctx, hllBase(db, key))
 		}
+		if m.Flavor == flavorBitmap {
+			d, err := s.bitmapLoad(ctx, db, key)
+			return len(d.live) > 0, err
+		}
 		cands, err := s.readSlots(ctx, strBase(db, key))
 		if err != nil {
 			return false, err

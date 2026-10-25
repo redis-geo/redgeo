@@ -28,6 +28,13 @@ type RStr interface {
 	PFAdd(key string, elems ...[]byte) (bool, error)
 	PFCount(keys ...string) (int64, error)
 	PFMerge(dest string, srcs ...string) error
+
+	// Bitmaps (a string-typed chunked value).
+	SetBit(key string, offset uint64, on bool) (bool, error)
+	GetBit(key string, offset uint64) (bool, error)
+	BitCount(key string, rng restypes.BitRange) (int64, error)
+	BitPos(key string, bit bool, rng restypes.BitRange) (int64, error)
+	BitOp(op, dest string, srcs ...string) (int64, error)
 }
 
 // RKey is the generic key-management storage interface.

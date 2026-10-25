@@ -95,6 +95,20 @@ func hllSlot(db int, key, replica string) ds.Key {
 	return ds.NewKey(hllBase(db, key) + encSeg(replica))
 }
 
+// bitBase / bitChunkBase / bitSlot hold per-replica bitmap chunk slots:
+// /{P}/d/{db}/{key}/b/{chunk:%08x}/{replicaID}
+func bitBase(db int, key string) string {
+	return fmt.Sprintf("%s/d/%d/%s/b/", part(db, key), db, encSeg(key))
+}
+
+func bitChunkBase(db int, key string, chunk int) string {
+	return fmt.Sprintf("%s%08x/", bitBase(db, key), chunk)
+}
+
+func bitSlot(db int, key string, chunk int, replica string) ds.Key {
+	return ds.NewKey(bitChunkBase(db, key, chunk) + encSeg(replica))
+}
+
 // hashBase / hashFieldBase / hashSlot hold per-field, per-replica LWW slots:
 // /{P}/d/{db}/{key}/h/{field}/{replicaID}
 func hashBase(db int, key string) string {

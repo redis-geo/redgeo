@@ -24,6 +24,8 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 			return s.deleteCounter(ctx, db, key)
 		} else if err == nil && ok && m.Flavor == flavorHLL {
 			return s.deleteHLL(ctx, db, key)
+		} else if err == nil && ok && m.Flavor == flavorBitmap {
+			return s.deleteBitmap(ctx, db, key)
 		}
 		// Tombstone this replica's value slot, then meta.
 		if err := s.writeSlot(ctx, strSlot(db, key, s.replica()), tagDeleted, nil); err != nil {
@@ -92,6 +94,9 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 		}
 		if m.Flavor == flavorHLL {
 			return s.copyHLL(ctx, db, key, newKey, m.ETimeMS)
+		}
+		if m.Flavor == flavorBitmap {
+			return s.copyBitmap(ctx, db, key, newKey, m.ETimeMS)
 		}
 		if m.Flavor.isCounter() {
 			// Collapse the counter to a single component on this replica under

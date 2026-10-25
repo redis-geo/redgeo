@@ -27,6 +27,14 @@ type SetOut struct {
 	Updated bool
 }
 
+// BitRange is the optional [start,end] range of BITCOUNT/BITPOS (bytes unless
+// InBits).
+type BitRange struct {
+	Start, End       int64
+	HasStart, HasEnd bool
+	InBits           bool
+}
+
 // ---- hashes ----
 
 // HashItem is a single field/value pair of a hash.

@@ -28,6 +28,7 @@ const (
 	flavorCounter      strFlavor = 2 // integer PN-counter (§6.4)
 	flavorCounterFloat strFlavor = 3 // float PN-counter (§6.4)
 	flavorHLL          strFlavor = 4 // HyperLogLog sketch (hll.go)
+	flavorBitmap       strFlavor = 5 // chunked bitmap (bitmap.go)
 )
 
 // isCounter reports whether a flavor is one of the PN-counter flavors.
