@@ -78,6 +78,8 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 		return s.deleteMeta(ctx, db, key)
 	case core.TypeJSON:
 		return s.deleteJSON(ctx, db, key)
+	case core.TypeBloom, core.TypeCMS, core.TypeTopK:
+		return s.deleteSketch(ctx, db, key)
 	case core.TypeStream:
 		return s.deleteStream(ctx, db, key)
 	default:
@@ -190,6 +192,8 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 		return s.writeMeta(ctx, db, newKey, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeList}})
 	case core.TypeJSON:
 		return s.copyJSON(ctx, db, key, newKey)
+	case core.TypeBloom, core.TypeCMS, core.TypeTopK:
+		return s.copySketch(ctx, db, key, newKey)
 	case core.TypeStream:
 		return s.copyStream(ctx, db, key, newKey)
 	default:

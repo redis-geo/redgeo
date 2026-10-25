@@ -20,5 +20,6 @@ func (s *Store) Redka(db int) redis.Redka {
 		listRepo{s: s, db: db}, // RList — Phase 6
 		streamRepo{s: s, db: db},
 		jsonRepo{s: s, db: db},
+		sketchRepo{s: s, db: db},
 	)
 }

@@ -741,6 +741,28 @@ into this replica's component, so overwriting a sketch cluster-wide races like
 any other `SET`/`DEL` (§6.1); `DEBUG`/`PFDEBUG`/`PFSELFTEST` are not implemented;
 sketches written by the pre-0.1 build used a different hash and must be rebuilt.
 
+### 12.3f Probabilistic sketches (Bloom, count-min, top-k)
+All three keep **per-replica components that merge on read**, so concurrent
+writers on different replicas never touch the same key and the result does not
+depend on arrival order. Parameters are an HLC-LWW slot, and the data lives under
+a path derived from a hash of them (`/s/h{hash}/…`): replicas that reserve
+identical parameters — including the defaults used for auto-creation — share one
+namespace and merge; if two replicas reserve *different* parameters
+concurrently, the LWW winner's data is used everywhere and the loser's inserts
+are ignored (never merged in as garbage). `DEL` removes every component;
+`RENAME` collapses the merged state into the new key. `TYPE` reports the
+RedisBloom names (`MBbloom--`, `CMSk-TYPE`, `TopK-TYPE`).
+
+**Bloom filter** (`BF.RESERVE/ADD/MADD/EXISTS/MEXISTS/INSERT/INFO/CARD`) is
+scalable like RedisBloom's: layer *i* has capacity `C·E^i` and error rate
+`P·0.5^i`, so geometry follows from the parameters and all replicas agree. Bits
+turn on only, so replicas merge by OR (4 KiB chunks, one key per replica per
+chunk). An insert goes to the first layer that is not full; layer fill is the sum
+of per-replica insert counts, which counts an item added concurrently on two
+replicas twice — the filter may grow a little early, never late. Not
+implemented: `BF.SCANDUMP`/`BF.LOADCHUNK` (the hash and layout are redgeo's own, so
+dumps do not interoperate with RedisBloom).
+
 ### 12.3b Streams: IDs, existence, cost
 Streams (`XADD/XLEN/XRANGE/XREVRANGE/XREAD/XDEL/XTRIM`) store each entry as a
 per-replica HLC-LWW slot keyed by ID (`/d/{db}/{key}/x/{ms}-{seq}/{replica}`),

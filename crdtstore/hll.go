@@ -30,10 +30,14 @@ type hllSketch [hllM]uint8
 
 // hllHash is Redis' MurmurHash64A with seed 0xadc83b19, so an element lands in
 // the same register here as in Redis and sketches interoperate (hllfmt.go).
-func hllHash(b []byte) uint64 {
+func hllHash(b []byte) uint64 { return murmur64a(b, 0xadc83b19) }
+
+// murmur64a is MurmurHash64A, also used (with other seeds) by the Bloom,
+// count-min and top-k sketches.
+func murmur64a(b []byte, seed uint64) uint64 {
 	const m = 0xc6a4a7935bd1e995
 	const r = 47
-	h := uint64(0xadc83b19) ^ (uint64(len(b)) * m)
+	h := seed ^ (uint64(len(b)) * m)
 	for ; len(b) >= 8; b = b[8:] {
 		k := binary.LittleEndian.Uint64(b)
 		k *= m

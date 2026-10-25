@@ -137,6 +137,25 @@ type ClaimOpts struct {
 	JustID     bool // do not increment the delivery count
 }
 
+// ---- probabilistic sketches ----
+
+// BloomOpts are the parameters of a Bloom filter. Expansion 0 means
+// non-scaling (a single fixed-size filter).
+type BloomOpts struct {
+	ErrorRate float64
+	Capacity  int64
+	Expansion int
+}
+
+// BloomInfo describes a Bloom filter (BF.INFO).
+type BloomInfo struct {
+	Capacity  int64 // total capacity of all sub-filters
+	SizeBytes int64
+	Filters   int
+	Items     int64
+	Expansion int // 0 = non-scaling
+}
+
 // ---- hashes ----
 
 // HashItem is a single field/value pair of a hash.

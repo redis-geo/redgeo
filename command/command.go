@@ -15,6 +15,7 @@ import (
 	"github.com/redis-geo/redgeo/command/script"
 	"github.com/redis-geo/redgeo/command/server"
 	"github.com/redis-geo/redgeo/command/set"
+	sketchcmd "github.com/redis-geo/redgeo/command/sketch"
 	"github.com/redis-geo/redgeo/command/stream"
 	str "github.com/redis-geo/redgeo/command/string"
 	"github.com/redis-geo/redgeo/command/zset"
@@ -265,6 +266,24 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return jsoncmd.ParseArrTrim(b)
 	case "json.arrindex":
 		return jsoncmd.ParseArrIndex(b)
+
+	// Bloom filter (RedisBloom subset)
+	case "bf.reserve":
+		return sketchcmd.ParseBFReserve(b)
+	case "bf.add":
+		return sketchcmd.ParseBFAdd(b, true)
+	case "bf.madd":
+		return sketchcmd.ParseBFAdd(b, false)
+	case "bf.insert":
+		return sketchcmd.ParseBFInsert(b)
+	case "bf.exists":
+		return sketchcmd.ParseBFExists(b, true)
+	case "bf.mexists":
+		return sketchcmd.ParseBFExists(b, false)
+	case "bf.info":
+		return sketchcmd.ParseBFInfo(b, false)
+	case "bf.card":
+		return sketchcmd.ParseBFInfo(b, true)
 
 	// scripting
 	case "eval", "eval_ro":

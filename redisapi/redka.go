@@ -166,6 +166,23 @@ type RJSON interface {
 	Update(key string, create bool, fn func(d *jsondoc.Doc) error) error
 }
 
+// RSketch is the probabilistic-sketch storage interface (Bloom filter,
+// count-min sketch, top-k). State is per-replica and merged on read, so
+// concurrent writers on different replicas converge.
+type RSketch interface {
+	// BFReserve creates a Bloom filter; ErrSketchExists if the key is taken.
+	BFReserve(key string, o restypes.BloomOpts) error
+	// BFAdd inserts items, reporting for each whether it was new. A missing key
+	// is created with create, or yields core.ErrNotFound when create is nil.
+	BFAdd(key string, items [][]byte, create *restypes.BloomOpts) ([]bool, error)
+	// BFExists tests items; a missing key contains nothing.
+	BFExists(key string, items [][]byte) ([]bool, error)
+	BFInfo(key string) (restypes.BloomInfo, error)
+}
+
+// ErrSketchExists is returned when a sketch is reserved on a key that has one.
+var ErrSketchExists = errors.New("ERR item exists")
+
 // RList is the list (fractional-index sequence) storage interface.
 type RList interface {
 	Delete(key string, elem any) (int, error)
@@ -196,11 +213,12 @@ type Redka struct {
 	list   RList
 	stream RStream
 	json   RJSON
+	sketch RSketch
 }
 
 // New builds a Redka from the six backend repositories.
-func New(str RStr, key RKey, hash RHash, set RSet, zset RZSet, list RList, stream RStream, json RJSON) Redka {
-	return Redka{str: str, key: key, hash: hash, set: set, zset: zset, list: list, stream: stream, json: json}
+func New(str RStr, key RKey, hash RHash, set RSet, zset RZSet, list RList, stream RStream, json RJSON, sketch RSketch) Redka {
+	return Redka{str: str, key: key, hash: hash, set: set, zset: zset, list: list, stream: stream, json: json, sketch: sketch}
 }
 
 func (r Redka) Str() RStr       { return r.str }
@@ -211,3 +229,4 @@ func (r Redka) ZSet() RZSet     { return r.zset }
 func (r Redka) List() RList     { return r.list }
 func (r Redka) JSON() RJSON     { return r.json }
 func (r Redka) Stream() RStream { return r.stream }
+func (r Redka) Sketch() RSketch { return r.sketch }

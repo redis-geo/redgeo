@@ -128,7 +128,7 @@ tier (DESIGN §6).
 
 | Tier | Behavior | Commands |
 |---|---|---|
-| **1 — conflict-free correct** | Converges with intuitive HLC-LWW / OR-Set / counter semantics | strings, hashes, sets, dedicated counters, HyperLogLog (`PF*`, max-merge), keys/SCAN, server |
+| **1 — conflict-free correct** | Converges with intuitive HLC-LWW / OR-Set / counter semantics | strings, hashes, sets, dedicated counters, HyperLogLog (`PF*`, max-merge), Bloom filters (`BF.*`, OR-merge), keys/SCAN, server |
 | **2 — converges, weaker** | Eventually consistent; some ops race before convergence | sorted sets, JSON documents (`JSON.*`, per-path merge), streams (`XADD`/`XRANGE`/`XREAD`/`XDEL`/`XTRIM` and consumer groups, at-least-once across replicas), geo (zset-backed), bitmaps (LWW per 512-byte chunk), lists, TTL, NX/XX existence checks |
 | **3 — best-effort** | No isolation/rollback/CAS | MULTI/EXEC, Lua scripting (`EVAL`/`EVALSHA`/`SCRIPT`), `*STORE` |
 | **out** | Not implemented | WATCH, RediSearch/TimeSeries/Bloom modules, cluster |

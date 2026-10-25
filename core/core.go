@@ -19,6 +19,9 @@ const (
 	TypeZSet   = TypeID(5)
 	TypeStream = TypeID(6)
 	TypeJSON   = TypeID(7)
+	TypeBloom  = TypeID(8)
+	TypeCMS    = TypeID(9)
+	TypeTopK   = TypeID(10)
 )
 
 // Common errors returned by data structure methods.
@@ -67,6 +70,12 @@ func (k Key) TypeName() string {
 		return "stream"
 	case TypeJSON:
 		return "ReJSON-RL"
+	case TypeBloom:
+		return "MBbloom--"
+	case TypeCMS:
+		return "CMSk-TYPE"
+	case TypeTopK:
+		return "TopK-TYPE"
 	}
 	return "unknown"
 }
