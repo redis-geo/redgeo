@@ -728,17 +728,32 @@ or expired cursor restarts from the beginning.
 ### 12.3a HyperLogLog and the Redis HLL format
 `PFADD/PFCOUNT/PFMERGE` use Redis' own hash (MurmurHash64A, seed `0xadc83b19`),
 register layout and Ertl estimator, so an element lands in the same register as
-in Redis. Internally each replica stores its own sketch (a compact sparse/dense
-form) and reads max-merge them, which is what makes concurrent `PFADD`s
-converge. At the string interface the key is a Redis HLL: `GET` returns the
-merged sketch as a dense `HYLL` string (12304 bytes, cached cardinality marked
-invalid so Redis recomputes it), `STRLEN`/`GETBIT`/`BITCOUNT` read it, and `SET`
-of a well-formed `HYLL` string — dense or sparse — stores an HLL, so a sketch
-moves between redgeo and Redis with `GET`/`SET` (or any tool that copies string
-values) and keeps working with `PF*`. `SET` of anything else overwrites an HLL,
-as in Redis; `SETBIT` on one is refused. Differences: a restored value is merged
-into this replica's component, so overwriting a sketch cluster-wide races like
-any other `SET`/`DEL` (§6.1); `DEBUG`/`PFDEBUG`/`PFSELFTEST` are not implemented;
+in Redis. Internally each replica stores its own sketch and reads max-merge them,
+which is what makes concurrent `PFADD`s converge. At the string interface the key
+is a Redis HLL: `GET` returns the merged sketch as a `HYLL` string, `STRLEN`/
+`GETBIT`/`BITCOUNT` read it, and `SET` of a well-formed `HYLL` string stores an
+HLL, so a sketch moves between redgeo and Redis with `GET`/`SET` and keeps working
+with `PF*`. `SET` of anything else overwrites an HLL, as in Redis; `SETBIT` on one
+is refused.
+
+**Encodings.** `GET` returns the *sparse* encoding while the sketch qualifies
+(every register ≤ 32 and the string ≤ 3000 bytes, Redis' `hll-sparse-max-bytes`
+default) and the *dense* 12304-byte form otherwise; the cached cardinality is
+written as "invalid" so Redis recomputes it. Redis stores the encoding as state
+(sparse → dense is one-way); here "sparse" is a function of the register
+contents, plus a per-key *dense pin* that `PFDEBUG TODENSE` and `SET` of a dense
+value set (and `PFADD`/`RENAME` preserve). A sparse value restored with `SET` is
+re-encoded canonically, so `GET` may return different — equivalent — bytes than
+were stored (a dense one round-trips byte for byte).
+
+**`PFDEBUG`** supports `GETREG` (all 16384 registers; like Redis it converts the
+key to dense), `DECODE` (`z:N` ZERO, `Z:N` XZERO, `v:value,run` VAL), `ENCODING`
+and `TODENSE`. **`PFSELFTEST`** runs the implementation against synthetic data —
+estimate accuracy from 1 to 100000 elements, dense/sparse/component round trips,
+merge commutativity/associativity/idempotence, re-add stability and hash spread —
+and replies `OK` or an error naming the failed check; it touches no keys.
+Differences: a restored value is merged into this replica's component, so
+overwriting a sketch cluster-wide races like any other `SET`/`DEL` (§6.1), and
 sketches written by the pre-0.1 build used a different hash and must be rebuilt.
 
 ### 12.3f Probabilistic sketches (Bloom, count-min, top-k)

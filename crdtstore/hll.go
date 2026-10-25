@@ -220,20 +220,29 @@ func (s *Store) hllCheck(ctx context.Context, db int, key string) (etimeMS int64
 	if err != nil {
 		return 0, err
 	}
-	if k.Type != core.TypeString || m.Flavor != flavorHLL {
+	if k.Type != core.TypeString || !m.Flavor.isHLL() {
 		return 0, core.ErrKeyType
 	}
 	return m.ETimeMS, nil
 }
 
 // hllStore writes sk as this replica's component and the key's meta.
+// The key's current dense pin is preserved.
 func (s *Store) hllStore(ctx context.Context, db int, key string, sk *hllSketch, etimeMS int64) error {
+	flavor := flavorHLL
+	if m, _, ok, err := s.readMeta(ctx, db, key); err == nil && ok && m.Flavor == flavorHLLDense {
+		flavor = flavorHLLDense
+	}
+	return s.hllStoreFlavor(ctx, db, key, sk, etimeMS, flavor)
+}
+
+func (s *Store) hllStoreFlavor(ctx context.Context, db int, key string, sk *hllSketch, etimeMS int64, flavor strFlavor) error {
 	if err := s.put(ctx, hllSlot(db, key, s.replica()), sk.encode()); err != nil {
 		return err
 	}
 	return s.writeMeta(ctx, db, key, metaEnvelope{
 		KeyMeta: KeyMeta{Type: core.TypeString, ETimeMS: etimeMS},
-		Flavor:  flavorHLL,
+		Flavor:  flavor,
 	})
 }
 
@@ -332,10 +341,10 @@ func (s *Store) deleteHLL(ctx context.Context, db int, key string) error {
 }
 
 // copyHLL collapses the merged sketch into this replica's component of newKey.
-func (s *Store) copyHLL(ctx context.Context, db int, key, newKey string, etimeMS int64) error {
+func (s *Store) copyHLL(ctx context.Context, db int, key, newKey string, etimeMS int64, flavor strFlavor) error {
 	merged, _, _, err := s.hllLoad(ctx, db, key)
 	if err != nil {
 		return err
 	}
-	return s.hllStore(ctx, db, newKey, merged, etimeMS)
+	return s.hllStoreFlavor(ctx, db, newKey, merged, etimeMS, flavor)
 }

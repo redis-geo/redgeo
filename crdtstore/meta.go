@@ -29,7 +29,11 @@ const (
 	flavorCounterFloat strFlavor = 3 // float PN-counter (§6.4)
 	flavorHLL          strFlavor = 4 // HyperLogLog sketch (hll.go)
 	flavorBitmap       strFlavor = 5 // chunked bitmap (bitmap.go)
+	flavorHLLDense     strFlavor = 6 // HyperLogLog pinned to the dense encoding (PFDEBUG TODENSE)
 )
+
+// isHLL reports whether a flavor is a HyperLogLog (sparse-eligible or pinned dense).
+func (f strFlavor) isHLL() bool { return f == flavorHLL || f == flavorHLLDense }
 
 // isCounter reports whether a flavor is one of the PN-counter flavors.
 func (f strFlavor) isCounter() bool {

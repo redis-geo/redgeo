@@ -30,6 +30,12 @@ type RStr interface {
 	PFAdd(key string, elems ...[]byte) (bool, error)
 	PFCount(keys ...string) (int64, error)
 	PFMerge(dest string, srcs ...string) error
+	// PFDEBUG / PFSELFTEST support.
+	PFRegisters(key string) ([]uint8, error)
+	PFEncoding(key string) (string, error)
+	PFToDense(key string) (bool, error)
+	PFDecode(key string) (string, error)
+	PFSelfTest() error
 
 	// Bitmaps (a string-typed chunked value).
 	SetBit(key string, offset uint64, on bool) (bool, error)

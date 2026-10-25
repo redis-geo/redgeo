@@ -22,7 +22,7 @@ func (s *Store) deleteKey(ctx context.Context, db int, key string, typ core.Type
 		// A string key is either a plain register or a PN-counter (§6.4).
 		if m, _, ok, err := s.readMeta(ctx, db, key); err == nil && ok && m.Flavor.isCounter() {
 			return s.deleteCounter(ctx, db, key)
-		} else if err == nil && ok && m.Flavor == flavorHLL {
+		} else if err == nil && ok && m.Flavor.isHLL() {
 			return s.deleteHLL(ctx, db, key)
 		} else if err == nil && ok && m.Flavor == flavorBitmap {
 			return s.deleteBitmap(ctx, db, key)
@@ -98,8 +98,8 @@ func (s *Store) copyKey(ctx context.Context, db int, key, newKey string, k core.
 		if err != nil {
 			return err
 		}
-		if m.Flavor == flavorHLL {
-			return s.copyHLL(ctx, db, key, newKey, m.ETimeMS)
+		if m.Flavor.isHLL() {
+			return s.copyHLL(ctx, db, key, newKey, m.ETimeMS, m.Flavor)
 		}
 		if m.Flavor == flavorBitmap {
 			return s.copyBitmap(ctx, db, key, newKey, m.ETimeMS)

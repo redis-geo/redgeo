@@ -44,7 +44,7 @@ func (s *Store) isLive(ctx context.Context, db int, key string, m metaEnvelope) 
 		if m.Flavor.isCounter() {
 			return s.counterExists(ctx, db, key)
 		}
-		if m.Flavor == flavorHLL {
+		if m.Flavor.isHLL() {
 			return s.anyPrefix(ctx, hllBase(db, key))
 		}
 		if m.Flavor == flavorBitmap {

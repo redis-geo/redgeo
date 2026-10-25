@@ -96,6 +96,10 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return str.ParsePFCount(b)
 	case "pfmerge":
 		return str.ParsePFMerge(b)
+	case "pfdebug":
+		return str.ParsePFDebug(b)
+	case "pfselftest":
+		return str.ParsePFSelfTest(b)
 
 	// key
 	case "del":

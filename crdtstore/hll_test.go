@@ -2,6 +2,7 @@ package crdtstore
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -74,8 +75,8 @@ func TestHLLCommands(t *testing.T) {
 	if _, err := str.PFAdd("plain", []byte("e")); err == nil {
 		t.Fatal("PFADD on plain string should fail")
 	}
-	if v, err := str.Get("a"); err != nil || len(v) != hyllDense || string(v[:4]) != "HYLL" {
-		t.Fatalf("GET on an HLL = %d bytes,%v", len(v), err)
+	if v, err := str.Get("a"); err != nil || string(v[:4]) != "HYLL" || v[4] != 1 || len(v) >= hllSparseMaxBytes {
+		t.Fatalf("GET on a small HLL = %d bytes (encoding %d),%v; want a sparse HYLL string", len(v), v[4], err)
 	}
 
 	// RENAME and DEL.
@@ -171,8 +172,8 @@ func TestHLLGetSetInterop(t *testing.T) {
 	str := st.Redka(0).Str()
 	str.PFAdd("src", hllElems(0, 500)...)
 	blob, err := str.Get("src")
-	if err != nil || len(blob) != hyllDense {
-		t.Fatalf("GET = %d bytes,%v", len(blob), err)
+	if err != nil || blob[4] != 1 || len(blob) > hllSparseMaxBytes {
+		t.Fatalf("GET = %d bytes (encoding %d),%v", len(blob), blob[4], err)
 	}
 	if err := str.Set("dst", []byte(blob)); err != nil {
 		t.Fatal(err)
@@ -235,5 +236,135 @@ func TestHLLHashProperties(t *testing.T) {
 	}
 	if len(seen) < hllM*6/10 {
 		t.Fatalf("only %d of %d registers hit by 20000 elements", len(seen), hllM)
+	}
+}
+
+func TestHLLSparseDenseSelection(t *testing.T) {
+	st := newTestStore(t)
+	str := st.Redka(0).Str()
+
+	// One element: header + a few opcodes, sparse; decodes to the same registers.
+	str.PFAdd("one", []byte("x"))
+	v, _ := str.Get("one")
+	if v[4] != 1 || len(v) > 40 {
+		t.Fatalf("single-element sketch = %d bytes encoding %d", len(v), v[4])
+	}
+	if enc, _ := str.PFEncoding("one"); enc != "sparse" {
+		t.Fatalf("encoding = %s", enc)
+	}
+	if d, err := str.PFDecode("one"); err != nil || !strings.Contains(d, "v:") || !strings.Contains(d, "Z:") {
+		t.Fatalf("decode = %q,%v", d, err)
+	}
+
+	// Many elements: the sparse form would exceed hll-sparse-max-bytes, so GET is dense.
+	str.PFAdd("many", hllElems(0, 5000)...)
+	v, _ = str.Get("many")
+	if v[4] != 0 || len(v) != hyllDense {
+		t.Fatalf("large sketch = %d bytes encoding %d", len(v), v[4])
+	}
+	if enc, _ := str.PFEncoding("many"); enc != "dense" {
+		t.Fatalf("encoding = %s", enc)
+	}
+	if _, err := str.PFDecode("many"); err == nil {
+		t.Fatal("DECODE of a dense sketch should fail")
+	}
+
+	// TODENSE pins a sparse key: GET is then dense, and it survives further adds.
+	if changed, err := str.PFToDense("one"); err != nil || !changed {
+		t.Fatalf("TODENSE = %v,%v", changed, err)
+	}
+	if changed, _ := str.PFToDense("one"); changed {
+		t.Fatal("second TODENSE reported a change")
+	}
+	str.PFAdd("one", []byte("y"))
+	v, _ = str.Get("one")
+	if v[4] != 0 || len(v) != hyllDense {
+		t.Fatalf("pinned sketch GET = %d bytes encoding %d", len(v), v[4])
+	}
+	if n, _ := str.PFCount("one"); n != 2 {
+		t.Fatalf("count after pin = %d", n)
+	}
+	// A pin follows RENAME; a dense value stored with SET stays dense byte-for-byte.
+	st.Redka(0).Key().Rename("one", "one2")
+	if enc, _ := str.PFEncoding("one2"); enc != "dense" {
+		t.Fatalf("pin lost on RENAME: %s", enc)
+	}
+	str.Set("copy", []byte(v))
+	if back, _ := str.Get("copy"); string(back) != string(v) {
+		t.Fatal("dense value changed on SET/GET round trip")
+	}
+
+	// GETREG converts to dense (as in Redis) and returns every register.
+	str.PFAdd("g", []byte("a"), []byte("b"))
+	regs, err := str.PFRegisters("g")
+	if err != nil || len(regs) != hllM {
+		t.Fatalf("GETREG = %d registers,%v", len(regs), err)
+	}
+	nz := 0
+	for _, r := range regs {
+		if r != 0 {
+			nz++
+		}
+	}
+	if nz == 0 || nz > 2 {
+		t.Fatalf("%d non-zero registers for 2 elements", nz)
+	}
+	if enc, _ := str.PFEncoding("g"); enc != "dense" {
+		t.Fatalf("GETREG did not densify: %s", enc)
+	}
+
+	// A register above 32 cannot be sparse.
+	var big hllSketch
+	big[7] = 40
+	if _, ok := big.encodeSparse(); ok {
+		t.Fatal("register 40 encoded sparse")
+	}
+	// Errors.
+	if _, err := str.PFEncoding("nokey"); err == nil {
+		t.Fatal("missing key accepted")
+	}
+	str.Set("plain", "x")
+	if _, err := str.PFEncoding("plain"); err == nil {
+		t.Fatal("plain string accepted")
+	}
+}
+
+func TestHLLSparseEncodingExact(t *testing.T) {
+	// Register 100 = 3, everything else zero:
+	// ZERO(64) ZERO(36) VAL(3,1) XZERO(16283).
+	var h hllSketch
+	h[100] = 3
+	sp, ok := h.encodeSparse()
+	if !ok {
+		t.Fatal("not sparse")
+	}
+	want := append([]byte("HYLL\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80"),
+		0x40|byte((100-1)>>8), byte((100-1)&0xff), // XZERO 100
+		0x80|(3-1)<<2, // VAL 3 x1
+		0x40|byte((16283-1)>>8), byte((16283-1)&0xff))
+	if string(sp) != string(want) {
+		t.Fatalf("got  % x\nwant % x", sp, want)
+	}
+	if d := decodeSparseOps(sp[hyllHeader:]); d != "Z:100 v:3,1 Z:16283" {
+		t.Fatalf("decode = %q", d)
+	}
+	// Long runs of one value split into VAL ops of 4.
+	var r hllSketch
+	for i := 0; i < 6; i++ {
+		r[i] = 2
+	}
+	sp, _ = r.encodeSparse()
+	if d := decodeSparseOps(sp[hyllHeader:]); d != "v:2,4 v:2,2 Z:16378" {
+		t.Fatalf("run split = %q", d)
+	}
+	got, ok := decodeRedis(sp)
+	if !ok || *got != r {
+		t.Fatal("round trip")
+	}
+}
+
+func TestHLLSelfTest(t *testing.T) {
+	if err := hllSelfTest(); err != nil {
+		t.Fatal(err)
 	}
 }

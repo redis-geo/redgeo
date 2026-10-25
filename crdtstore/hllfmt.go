@@ -1,5 +1,10 @@
 package crdtstore
 
+import (
+	"strconv"
+	"strings"
+)
+
 // Redis' HyperLogLog string format, so sketches can be moved between redgeo and
 // Redis with GET/SET (and so PFADD works on a restored value):
 //
@@ -94,4 +99,94 @@ func decodeRedis(b []byte) (*hllSketch, bool) {
 		return h, idx == hllM
 	}
 	return nil, false
+}
+
+// Sparse encoding (what Redis uses while a sketch is small).
+
+const (
+	hllSparseMaxBytes = 3000 // Redis' hll-sparse-max-bytes default
+	hllSparseValMax   = 32   // a register above this forces the dense encoding
+)
+
+// sparseOps appends the sparse opcodes for the registers. ok=false if a
+// register is too large for the sparse form.
+func (h *hllSketch) sparseOps() (ops []byte, ok bool) {
+	for i := 0; i < hllM; {
+		v := h[i]
+		run := 1
+		for i+run < hllM && h[i+run] == v {
+			run++
+		}
+		i += run
+		if v == 0 {
+			for run > 0 {
+				if run <= 64 {
+					ops = append(ops, byte(run-1)) // ZERO
+					break
+				}
+				n := min(run, hllM)
+				ops = append(ops, 0x40|byte((n-1)>>8), byte((n-1)&0xff)) // XZERO
+				run -= n
+			}
+			continue
+		}
+		if v > hllSparseValMax {
+			return nil, false
+		}
+		for run > 0 {
+			n := min(run, 4)
+			ops = append(ops, 0x80|(v-1)<<2|byte(n-1)) // VAL
+			run -= n
+		}
+	}
+	return ops, true
+}
+
+// encodeSparse renders the sketch in the sparse encoding, ok=false if it does
+// not qualify (value too large, or longer than hllSparseMaxBytes).
+func (h *hllSketch) encodeSparse() ([]byte, bool) {
+	ops, ok := h.sparseOps()
+	if !ok || hyllHeader+len(ops) > hllSparseMaxBytes {
+		return nil, false
+	}
+	out := make([]byte, hyllHeader, hyllHeader+len(ops))
+	copy(out, hyllMagic[:])
+	out[4] = 1
+	out[15] = 0x80
+	return append(out, ops...), true
+}
+
+// encodeAuto is what GET returns: sparse while the sketch qualifies, like
+// Redis, unless the key was pinned dense (PFDEBUG TODENSE, or SET of a dense
+// value).
+func (h *hllSketch) encodeAuto(pinDense bool) []byte {
+	if !pinDense {
+		if sp, ok := h.encodeSparse(); ok {
+			return sp
+		}
+	}
+	return h.encodeRedis()
+}
+
+// decodeSparseOps renders sparse opcodes the way PFDEBUG DECODE does:
+// z:N (ZERO), Z:N (XZERO), v:value,run (VAL).
+func decodeSparseOps(body []byte) string {
+	var parts []string
+	for len(body) > 0 {
+		op := body[0]
+		switch {
+		case op&0xc0 == 0x00:
+			parts = append(parts, "z:"+strconv.Itoa(int(op&0x3f)+1))
+			body = body[1:]
+		case op&0xc0 == 0x40 && len(body) >= 2:
+			parts = append(parts, "Z:"+strconv.Itoa((int(op&0x3f)<<8|int(body[1]))+1))
+			body = body[2:]
+		case op&0x80 != 0:
+			parts = append(parts, "v:"+strconv.Itoa(int((op>>2)&0x1f)+1)+","+strconv.Itoa(int(op&3)+1))
+			body = body[1:]
+		default:
+			return strings.Join(parts, " ")
+		}
+	}
+	return strings.Join(parts, " ")
 }
