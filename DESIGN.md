@@ -778,6 +778,18 @@ replicas twice — the filter may grow a little early, never late. Not
 implemented: `BF.SCANDUMP`/`BF.LOADCHUNK` (the hash and layout are redgeo's own, so
 dumps do not interoperate with RedisBloom).
 
+**Count-min sketch** (`CMS.INITBYDIM/INITBYPROB/INCRBY/QUERY/MERGE/INFO`): a
+depth×width matrix where each cell is a per-replica counter component
+(`c/{cell}/{replica}`, only non-zero cells exist) and a cell's value is the sum
+over replicas — concurrent increments on different replicas add up exactly as if
+applied to one sketch, so estimates never undercount. Components are *signed* so
+that `CMS.MERGE` can replace the destination with the weighted sum of its sources
+by writing `own = target − (everyone else's)`; a merge therefore replicates like
+any other write, and an increment racing a merge on another replica is kept on
+top of the merged value. Weights may be negative (estimates are clamped at 0).
+`INITBYPROB` uses `width = ⌈2/ε⌉`, `depth = ⌈log₂(1/δ)⌉`. Each `INCRBY` reads
+and rewrites `depth` cells (one small key each), so it costs O(depth) queries.
+
 ### 12.3b Streams: IDs, existence, cost
 Streams (`XADD/XLEN/XRANGE/XREVRANGE/XREAD/XDEL/XTRIM`) store each entry as a
 per-replica HLC-LWW slot keyed by ID (`/d/{db}/{key}/x/{ms}-{seq}/{replica}`),

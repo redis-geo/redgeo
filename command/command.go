@@ -289,6 +289,20 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 	case "bf.card":
 		return sketchcmd.ParseBFInfo(b, true)
 
+	// count-min sketch
+	case "cms.initbydim":
+		return sketchcmd.ParseCMSInitByDim(b)
+	case "cms.initbyprob":
+		return sketchcmd.ParseCMSInitByProb(b)
+	case "cms.incrby":
+		return sketchcmd.ParseCMSIncrBy(b)
+	case "cms.query":
+		return sketchcmd.ParseCMSQuery(b)
+	case "cms.merge":
+		return sketchcmd.ParseCMSMerge(b)
+	case "cms.info":
+		return sketchcmd.ParseCMSInfo(b)
+
 	// scripting
 	case "eval", "eval_ro":
 		return script.ParseEval(b, false)

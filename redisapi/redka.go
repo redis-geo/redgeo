@@ -184,7 +184,21 @@ type RSketch interface {
 	// BFExists tests items; a missing key contains nothing.
 	BFExists(key string, items [][]byte) ([]bool, error)
 	BFInfo(key string) (restypes.BloomInfo, error)
+
+	// CMSInit creates a count-min sketch; ErrSketchExists if the key is taken.
+	CMSInit(key string, width, depth int) error
+	// CMSIncr adds incs (all > 0) to items and returns their new estimates;
+	// core.ErrNotFound if the key is missing.
+	CMSIncr(key string, items [][]byte, incs []int64) ([]int64, error)
+	CMSQuery(key string, items [][]byte) ([]int64, error)
+	// CMSMerge replaces dest with the weighted sum of srcs (all must exist and
+	// share dest's dimensions, else ErrCMSDims).
+	CMSMerge(dest string, srcs []string, weights []int64) error
+	CMSInfo(key string) (width, depth int, count int64, err error)
 }
+
+// ErrCMSDims is returned when merged count-min sketches differ in size.
+var ErrCMSDims = errors.New("CMS: width/depth doesn't match")
 
 // ErrSketchExists is returned when a sketch is reserved on a key that has one.
 var ErrSketchExists = errors.New("ERR item exists")
