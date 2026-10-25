@@ -131,6 +131,14 @@ func streamLastSlot(db int, key, replica string) ds.Key {
 	return ds.NewKey(streamLastBase(db, key) + encSeg(replica))
 }
 
+// replicaRegPrefix / replicaRegKey form the replica registry: each node writes
+// one presence key so every other node (and compaction, package rotation) can
+// enumerate the cluster's members with one tiny prefix query. It lives in
+// bucket 00 outside the /m/ and /d/ keyspaces, so keyspace commands never see it.
+const replicaRegPrefix = "/00/r/"
+
+func replicaRegKey(replica string) ds.Key { return ds.NewKey(replicaRegPrefix + encSeg(replica)) }
+
 // hashBase / hashFieldBase / hashSlot hold per-field, per-replica LWW slots:
 // /{P}/d/{db}/{key}/h/{field}/{replicaID}
 func hashBase(db int, key string) string {

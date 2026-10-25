@@ -19,8 +19,9 @@ type handler struct {
 	store *crdtstore.Store
 	ps    *redcon.PubSub
 
-	bus    Bus    // optional: geo pub/sub (bus.go)
-	origin string // this replica, to drop our own bus echoes
+	bus       Bus       // optional: geo pub/sub (bus.go)
+	origin    string    // this replica, to drop our own bus echoes
+	compactor Compactor // optional: REDGEO.* admin commands (compact.go)
 }
 
 func newHandler(store *crdtstore.Store) *handler {
@@ -60,6 +61,9 @@ func (h *handler) serve(conn redcon.Conn, rcmd redcon.Command) {
 		return
 	case "info":
 		h.doInfo(conn)
+		return
+	case "redgeo.compact", "redgeo.members", "redgeo.forget":
+		h.doRedgeo(conn, name, rcmd.Args)
 		return
 	}
 

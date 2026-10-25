@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"time"
@@ -124,19 +125,43 @@ func (s *switchBcast) pump(ctx context.Context) {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
+		gen, payload, ok := unwrapGen(data)
 		s.mu.Lock()
 		v := s.cur
 		s.mu.Unlock()
-		if v != nil {
+		// Only deliver traffic of the generation this node is on. Without this a
+		// replica already on generation g+1 would import the entire old DAG
+		// from a peer that has not switched yet, undoing the compaction.
+		if v != nil && ok && gen == v.gen {
 			select {
-			case v.in <- data:
+			case v.in <- payload:
 			default: // slow consumer: drop; anti-entropy re-sends heads
 			}
 		}
 	}
 }
 
-func (s *switchBcast) newView() *bview { return &bview{s: s, in: make(chan []byte, 1024)} }
+func (s *switchBcast) newView(gen int) *bview {
+	return &bview{s: s, gen: gen, in: make(chan []byte, 1024)}
+}
+
+// genMagic prefixes every broadcast so replicas on different generations ignore
+// each other (see pump).
+var genMagic = [4]byte{'r', 'g', 'e', 'n'}
+
+func wrapGen(gen int, data []byte) []byte {
+	out := make([]byte, 0, 8+len(data))
+	out = append(out, genMagic[:]...)
+	out = binary.BigEndian.AppendUint32(out, uint32(gen))
+	return append(out, data...)
+}
+
+func unwrapGen(b []byte) (gen int, payload []byte, ok bool) {
+	if len(b) < 8 || [4]byte(b[:4]) != genMagic {
+		return 0, nil, false
+	}
+	return int(binary.BigEndian.Uint32(b[4:8])), b[8:], true
+}
 
 func (s *switchBcast) setCurrent(v *bview) {
 	s.mu.Lock()
@@ -146,11 +171,30 @@ func (s *switchBcast) setCurrent(v *bview) {
 
 // bview is one generation's Broadcaster.
 type bview struct {
-	s  *switchBcast
-	in chan []byte
+	s   *switchBcast
+	gen int
+	in  chan []byte
+
+	mu   sync.Mutex
+	last []byte // most recent payload this generation broadcast
 }
 
 func (v *bview) Broadcast(ctx context.Context, data []byte) error {
+	wrapped := wrapGen(v.gen, data)
+	v.mu.Lock()
+	v.last = wrapped
+	v.mu.Unlock()
+	return v.s.inner.Broadcast(ctx, wrapped)
+}
+
+// resend re-broadcasts the last payload (the seed's heads right after Stage).
+func (v *bview) resend(ctx context.Context) error {
+	v.mu.Lock()
+	data := append([]byte(nil), v.last...)
+	v.mu.Unlock()
+	if len(data) == 0 {
+		return nil
+	}
 	return v.s.inner.Broadcast(ctx, data)
 }
 

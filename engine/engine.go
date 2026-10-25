@@ -176,9 +176,9 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		}
 		p := &partition{idx: i, nsBase: nsBase, gate: newGate()}
 		p.sb = newSwitchBcast(pumpCtx, bcastFor(i))
-		p.view = p.sb.newView()
-		p.sb.setCurrent(p.view)
 		e.restoreGen(ctx, p) // a rotated partition resumes its latest generation
+		p.view = p.sb.newView(p.gen)
+		p.sb.setCurrent(p.view)
 		store, err := crdt.New(backing, p.namespace(), dagSvc, p.view, opts)
 		if err != nil {
 			_ = e.Close()

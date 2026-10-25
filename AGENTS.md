@@ -39,6 +39,8 @@ parser/ core/ forked redka arg parser + core types
 hlc/          hybrid logical clock
 engine/       go-ds-crdt setup: partition DAG routing, Pebble/in-mem, broadcasters, rotation
 crdtstore/    ★ the backend: six R* impls + key codec, slots, meta, counters, locks, scan, txn, compaction
+rotation/     cluster-coordinated compaction protocol (freeze → converge → switch generation → purge)
+script/       sandboxed Lua VM behind EVAL/EVALSHA (command/script adapts it)
 ```
 
 The command layer depends only on the six `redisapi.R*` interfaces. `crdtstore`

@@ -31,6 +31,8 @@ core/            forked redka core types (TypeID, Key, Value, error sentinels)
 hlc/             hybrid logical clock
 engine/          go-ds-crdt setup: partition DAG routing, Pebble/in-mem backing, broadcasters, rotation
 crdtstore/       ★ the backend: the six R* impls + key codec, slots, meta, counters, locks, scan, txn, compaction
+rotation/        cluster-coordinated compaction protocol (freeze → converge → switch generation → purge)
+script/          sandboxed Lua VM behind EVAL/EVALSHA (command/script adapts it)
 ```
 
 ### Dependency direction (no import cycles)

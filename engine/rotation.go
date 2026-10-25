@@ -2,14 +2,14 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"time"
 
+	"github.com/ipfs/boxo/datastore/dshelp"
+	"github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
 	crdt "github.com/ipfs/go-ds-crdt"
@@ -98,24 +98,49 @@ func (e *Engine) Freeze(ctx context.Context, idx int) error { return e.parts[idx
 // Unfreeze lets writes (and reads) through again.
 func (e *Engine) Unfreeze(idx int) { e.parts[idx].gate.set(false, false) }
 
-// HeadsDigest is a digest of the partition's current DAG heads: two replicas
-// with equal digests hold identical CRDT state.
-func (e *Engine) HeadsDigest(ctx context.Context, idx int) string {
+// Heads lists the CIDs of the partition's current DAG heads, sorted.
+func (e *Engine) Heads(ctx context.Context, idx int) []string {
 	p := e.parts[idx]
 	c, done := p.active()
 	defer done()
 	heads := c.InternalStats(ctx).Heads
-	cs := make([]string, len(heads))
+	out := make([]string, len(heads))
 	for i, h := range heads {
-		cs[i] = h.Cid.String()
+		out[i] = h.Cid.String()
 	}
-	sort.Strings(cs)
-	sum := sha256.New()
-	for _, c := range cs {
-		sum.Write([]byte(c))
-		sum.Write([]byte{0})
+	sort.Strings(out)
+	return out
+}
+
+// Missing returns those of the given block CIDs this replica has not processed.
+// Compaction needs every replica to have processed every block any replica
+// holds; comparing head sets alone is not enough, since go-ds-crdt's head
+// bookkeeping is path dependent (equal state can have different heads).
+func (e *Engine) Missing(ctx context.Context, idx int, cids []string) []string {
+	p := e.parts[idx]
+	p.mu.RLock()
+	ns := p.nsFor(p.gen)
+	p.mu.RUnlock()
+	var missing []string
+	for _, s := range cids {
+		c, err := cid.Decode(s)
+		if err != nil {
+			missing = append(missing, s)
+			continue
+		}
+		key := ns.ChildString("b").ChildString(dshelp.MultihashToDsKey(c.Hash()).String())
+		if ok, err := e.backing.Has(ctx, key); err != nil || !ok {
+			missing = append(missing, s)
+		}
 	}
-	return hex.EncodeToString(sum.Sum(nil))
+	return missing
+}
+
+// Quiescent reports whether the partition's DAG processing queue is empty.
+func (e *Engine) Quiescent(ctx context.Context, idx int) bool {
+	c, done := e.parts[idx].active()
+	defer done()
+	return c.InternalStats(ctx).QueuedJobs == 0
 }
 
 // stagedGen is a prepared next generation.
@@ -138,7 +163,7 @@ func (e *Engine) Stage(ctx context.Context, idx int, seed bool) (genesis string,
 	cur, gen := p.crdt, p.gen+1
 	p.mu.Unlock()
 
-	view := p.sb.newView()
+	view := p.sb.newView(gen)
 	next, err := crdt.New(e.backing, p.nsFor(gen), e.dagSvc, view, e.opts)
 	if err != nil {
 		return "", 0, fmt.Errorf("engine: stage partition %d: %w", idx, err)
@@ -205,6 +230,17 @@ func (e *Engine) Activate(ctx context.Context, idx int, waitSeed bool) error {
 	return e.persistGen(ctx, p)
 }
 
+// ResendSeed re-broadcasts the active generation's latest heads. A coordinator
+// calls it after peers have switched, since the seed's first broadcast reaches
+// them while they are still on the old generation.
+func (e *Engine) ResendSeed(ctx context.Context, idx int) error {
+	p := e.parts[idx]
+	p.mu.RLock()
+	v := p.view
+	p.mu.RUnlock()
+	return v.resend(ctx)
+}
+
 // WaitSeed blocks until the active generation's heads include genesis (the
 // coordinator's seed has replicated here), then re-opens reads.
 func (e *Engine) WaitSeed(ctx context.Context, idx int, genesis string, timeout time.Duration) error {
@@ -269,7 +305,7 @@ func (e *Engine) Rollback(ctx context.Context, idx int) error {
 	case p.hasPrev:
 		restored, view := p.oldDS, p.oldView
 		if restored == nil { // restarted mid-rotation: reopen the old generation
-			view = p.sb.newView()
+			view = p.sb.newView(p.prevGen)
 			var err error
 			if restored, err = crdt.New(e.backing, p.nsFor(p.prevGen), e.dagSvc, view, e.opts); err != nil {
 				p.mu.Unlock()

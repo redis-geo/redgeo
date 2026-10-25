@@ -71,6 +71,7 @@ OK
 | `-p2p-listen` | `/ip4/0.0.0.0/tcp/0` | libp2p listen multiaddr |
 | `-bootstrap` | `""` | Comma-separated bootstrap peer multiaddrs |
 | `-partitions` | `1` | Number of named partition DAGs (multi-node; `256` = one per bucket) |
+| `-compact-every` | `0` | Run cluster-wide compaction this often (`0` = only on `REDGEO.COMPACT`); only the lowest replica ID acts |
 
 ### Persistent, single node
 
@@ -93,6 +94,16 @@ go run ./cmd/redgeo -data ./b -addr :6381 -p2p -bootstrap /ip4/127.0.0.1/tcp/400
 Writes on either node replicate to the other and converge. Set `-partitions 256`
 on all nodes for per-partition DAGs (DESIGN §5.5, §11) — this is immutable once
 data exists, so decide it up front.
+
+### Compaction
+
+go-ds-crdt keeps every tombstone forever. `REDGEO.COMPACT [partition|ALL]`
+reclaims them cluster-wide by rotating each partition to a fresh generation
+seeded with only the live data. It first waits until every known replica holds
+identical state and pauses that partition's writes briefly, and it refuses (and
+changes nothing) if any known replica is unreachable. `REDGEO.MEMBERS` lists the
+replicas it needs; `REDGEO.FORGET <id>` retires one permanently. See
+[DESIGN.md §12.2](DESIGN.md).
 
 ## Supported commands & semantics
 

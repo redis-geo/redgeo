@@ -17,6 +17,7 @@ import (
 
 	"github.com/redis-geo/redgeo/crdtstore"
 	"github.com/redis-geo/redgeo/engine"
+	"github.com/redis-geo/redgeo/rotation"
 	"github.com/redis-geo/redgeo/server"
 )
 
@@ -28,6 +29,7 @@ func main() {
 	p2pListen := flag.String("p2p-listen", "/ip4/0.0.0.0/tcp/0", "libp2p listen multiaddr")
 	bootstraps := flag.String("bootstrap", "", "comma-separated bootstrap peer multiaddrs")
 	partitions := flag.Int("partitions", 1, "number of named partition DAGs (multi-node; 256 = one per bucket)")
+	compactEvery := flag.Duration("compact-every", 0, "run cluster-wide compaction this often (0 = only on REDGEO.COMPACT); only the lowest replica ID acts")
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -39,14 +41,16 @@ func main() {
 	}
 
 	cfg := engine.Config{PebbleDir: pebbleDir}
-	var bus server.Bus // geo pub/sub, only with -p2p
+	var bus server.Bus         // geo pub/sub, only with -p2p
+	var ctl rotation.Transport // compaction control channel, only with -p2p
 
 	// Multi-node mode: stand up the libp2p mesh and derive the replica ID from
 	// the peer identity (DESIGN §7, §8).
 	if *p2p {
-		keyPath := ""
+		keyPath, blocksDir := "", ""
 		if *dataDir != "" {
 			keyPath = filepath.Join(*dataDir, "p2p.key")
+			blocksDir = filepath.Join(*dataDir, "blocks")
 			_ = os.MkdirAll(*dataDir, 0o700)
 		}
 		var boots []string
@@ -54,9 +58,10 @@ func main() {
 			boots = strings.Split(*bootstraps, ",")
 		}
 		cl, err := engine.NewCluster(ctx, engine.ClusterConfig{
-			ListenAddrs: []string{*p2pListen},
-			KeyPath:     keyPath,
-			Bootstraps:  boots,
+			ListenAddrs:   []string{*p2pListen},
+			KeyPath:       keyPath,
+			BlockstoreDir: blocksDir,
+			Bootstraps:    boots,
 		})
 		if err != nil {
 			log.Fatalf("cluster: %v", err)
@@ -65,6 +70,9 @@ func main() {
 		cfg.DAGService = cl.DAGService
 		if cl.Bus != nil {
 			bus = cl.Bus
+		}
+		if cl.Ctl != nil {
+			ctl = cl.Ctl
 		}
 		cfg.RebroadcastInterval = 5 * time.Second
 		cfg.ReplicaID = cl.ReplicaID
@@ -98,7 +106,22 @@ func main() {
 	sweeper.Start(ctx)
 	defer sweeper.Stop()
 
+	// Compaction: every node can coordinate one; membership comes from the
+	// replicated registry plus the control channel (package rotation).
+	if err := store.RegisterSelf(ctx); err != nil {
+		log.Fatalf("register replica: %v", err)
+	}
+	node := rotation.New(rotation.Config{
+		Engine: eng, ID: rid, Transport: ctl,
+		Observe: store.Replicas, Unregister: store.UnregisterReplica,
+	})
+	node.Start(ctx)
+	if *compactEvery > 0 {
+		go autoCompact(ctx, node, rid, *compactEvery)
+	}
+
 	srv := server.New(*addr, store)
+	srv.SetCompactor(node)
 	if bus != nil {
 		srv.SetBus(bus, rid)
 	}
@@ -155,4 +178,33 @@ func randID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// autoCompact periodically compacts every partition. All nodes may run it with
+// the same interval; only the lexicographically lowest known replica ID acts, so
+// they do not collide.
+func autoCompact(ctx context.Context, node *rotation.Node, self string, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		lowest := true
+		for _, m := range node.Members() {
+			if m < self {
+				lowest = false
+			}
+		}
+		if !lowest {
+			continue
+		}
+		if err := node.CompactAll(ctx); err != nil {
+			log.Printf("compaction: %v", err)
+		} else {
+			log.Printf("compaction complete")
+		}
+	}
 }

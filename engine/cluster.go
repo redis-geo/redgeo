@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	ds "github.com/ipfs/go-datastore"
 	"os"
 
 	crdt "github.com/ipfs/go-ds-crdt"
@@ -22,6 +23,9 @@ const dataTopic = "redgeo/crdt/v1"
 // busTopic carries PUBLISH messages between replicas.
 const busTopic = "redgeo/pubsub/v1"
 
+// ctlTopic carries the compaction coordination protocol.
+const ctlTopic = "redgeo/ctl/v1"
+
 // ClusterConfig configures the libp2p replication mesh (DESIGN §7).
 type ClusterConfig struct {
 	// ListenAddrs are libp2p multiaddrs to listen on (e.g.
@@ -30,6 +34,9 @@ type ClusterConfig struct {
 	// KeyPath persists the node's ed25519 identity key; the peer ID derived
 	// from it is the stable replicaID (DESIGN §8). Empty = ephemeral identity.
 	KeyPath string
+	// BlockstoreDir persists the IPFS-Lite block store (the DAG nodes behind the
+	// CRDT) on disk. Empty = in memory, lost on restart.
+	BlockstoreDir string
 	// Bootstraps are peer multiaddrs to dial on startup (e.g.
 	// "/ip4/1.2.3.4/tcp/4001/p2p/Qm...").
 	Bootstraps []string
@@ -45,7 +52,9 @@ type Cluster struct {
 	BroadcasterFactory func(p int) crdt.Broadcaster
 	DAGService         ipld.DAGService
 	// Bus is a separate gossipsub topic for geo pub/sub messages (DESIGN §12.5).
-	Bus       crdt.Broadcaster
+	Bus crdt.Broadcaster
+	// Ctl is the rotation control-plane topic (package rotation).
+	Ctl       crdt.Broadcaster
 	ReplicaID string // libp2p peer ID
 	closers   []func() error
 }
@@ -80,7 +89,13 @@ func NewCluster(ctx context.Context, cfg ClusterConfig) (*Cluster, error) {
 		return nil, fmt.Errorf("cluster: setup libp2p: %w", err)
 	}
 
-	lite, err := ipfslite.New(ctx, nil, nil, h, dht, nil)
+	blocks, err := makeBacking(cfg.BlockstoreDir)
+	if err != nil {
+		_ = h.Close()
+		_ = dht.Close()
+		return nil, fmt.Errorf("cluster: block store: %w", err)
+	}
+	lite, err := ipfslite.New(ctx, blocks.(ds.Batching), nil, h, dht, nil)
 	if err != nil {
 		_ = h.Close()
 		_ = dht.Close()
@@ -133,13 +148,19 @@ func NewCluster(ctx context.Context, cfg ClusterConfig) (*Cluster, error) {
 		bus = b
 	}
 
+	var ctl crdt.Broadcaster
+	if c, cerr := crdt.NewPubSubBroadcaster(ctx, psub, ctlTopic); cerr == nil {
+		ctl = c
+	}
+
 	return &Cluster{
+		Ctl:                ctl,
 		Bus:                bus,
 		Broadcaster:        bcast,
 		BroadcasterFactory: factory,
 		DAGService:         lite,
 		ReplicaID:          pid.String(),
-		closers:            []func() error{dht.Close, h.Close},
+		closers:            []func() error{dht.Close, h.Close, blockCloser(blocks)},
 	}, nil
 }
 
@@ -172,4 +193,13 @@ func loadOrCreateKey(path string) (crypto.PrivKey, error) {
 		}
 	}
 	return priv, nil
+}
+
+func blockCloser(d ds.Datastore) func() error {
+	return func() error {
+		if c, ok := d.(interface{ Close() error }); ok {
+			return c.Close()
+		}
+		return nil
+	}
 }

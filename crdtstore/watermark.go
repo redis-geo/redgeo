@@ -3,6 +3,7 @@ package crdtstore
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/redis-geo/redgeo/hlc"
@@ -117,4 +118,33 @@ func (s *Store) ObserveFromSlots(ctx context.Context, w *Watermark) error {
 		}
 	}
 	return nil
+}
+
+// RegisterSelf records this replica in the replicated member registry. Call it
+// once at startup; it is idempotent.
+func (s *Store) RegisterSelf(ctx context.Context) error {
+	return s.put(ctx, replicaRegKey(s.replica()), []byte{1})
+}
+
+// UnregisterReplica removes a replica from the registry (the deletion
+// replicates, so every node stops requiring it). Used to retire a node.
+func (s *Store) UnregisterReplica(ctx context.Context, replica string) error {
+	return s.del(ctx, replicaRegKey(replica))
+}
+
+// Replicas lists every replica that has registered itself (this node included)
+// — the members whose agreement a compaction needs (package rotation).
+func (s *Store) Replicas(ctx context.Context) ([]string, error) {
+	entries, err := s.query(ctx, replicaRegPrefix, true)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if r, derr := decSeg(strings.TrimPrefix(e.Key, replicaRegPrefix)); derr == nil {
+			out = append(out, r)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }

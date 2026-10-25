@@ -666,18 +666,55 @@ deltas. This is the cross-partition atomicity loss already called out in §5.5;
 single-DAG deployments (`NumPartitions <= 1`) keep full per-transaction
 atomicity. `MULTI` also has no isolation or rollback (Redis-compatible).
 
-### 12.2 Compaction: single-node automated; cluster rotation is operational
-`engine.RotatePartition` / `Rotate` implement global-purge compaction by DAG
-rotation (snapshot live → fresh genesis namespace → purge old), gated on the
-causal-stability watermark (§5.5). **Only single-node rotation is automated and
-tested.** In a cluster, all replicas must rotate a partition **together** in a
-maintenance window, or an un-rotated peer merges the fresh genesis with its old
-DAG and resurrects tombstoned keys — that coordination is an operational
-procedure, not yet automated. The watermark itself is a **min-of-high-water
-approximation**: it refuses to cut until every expected replica is observed
-(safe), but a fully precise cut needs a per-pair sync matrix (§5.5). Rolling
-per-partition rotation (the §5.5 "target") is built; cluster orchestration of it
-is the remaining work.
+### 12.2 Compaction: cluster-coordinated rotation *(resolved)*
+go-ds-crdt never garbage-collects, so reclaiming tombstones means rotating a
+partition to a fresh generation seeded with only its live state (§5.5). In a
+cluster that is safe only if, at the instant of the cut, **every replica holds
+the same blocks and nobody mints new deltas**; otherwise a lagging replica's
+un-seen adds resurrect deleted keys against the purged tombstones. Package
+`rotation` establishes that with a commit protocol over a control channel (the
+`redgeo/ctl/v1` gossipsub topic, separate from data and pub/sub):
+
+1. **Prepare.** The coordinator freezes writes on its partition and asks every
+   known member to do the same (draining in-flight writes). It sends the union
+   of all DAG heads seen; each member replies with its heads and which of those
+   blocks it has *not processed*. The coordinator proceeds only after two
+   consecutive full rounds with nothing missing anywhere and no new heads — not
+   by comparing head sets, because go-ds-crdt's head bookkeeping is path
+   dependent (equal state can carry different heads).
+2. **Switch.** The coordinator stages generation g+1 seeded from its (now
+   identical) live state and activates it; members activate an empty g+1 and wait
+   for the seed to replicate to them. Every broadcast carries its generation, and
+   a replica ignores other generations' traffic — otherwise one already on g+1
+   would re-import the entire old DAG from a peer still on g.
+3. **Done.** When every member is ready the coordinator announces done; all
+   purge generation g and unfreeze. Generation g is kept until then, so any
+   failure or timeout before done rolls every replica back with nothing lost.
+
+Other properties:
+- **All members must take part.** Membership is the replicated registry
+  (`/00/r/{replica}`, written by `RegisterSelf` at startup) plus control-channel
+  hellos, persisted locally. An unreachable member blocks compaction
+  (`ErrMemberUnavailable`) instead of being left to resurrect old state; retire a
+  replica for good with `REDGEO.FORGET`.
+- **Writes pause, they are not lost.** While a partition is frozen its writes
+  wait (up to 15 s, then `LOADING`); a `MULTI`/`EVAL` that straddles a rotation
+  fails with `TRYAGAIN` and can be retried. Reads continue except for the instant
+  between activating a seeded generation and the seed arriving. Rolling mode
+  (`REDGEO.COMPACT ALL`, `-compact-every`) rotates partitions one at a time.
+- **Crash safety.** A partition's generation, and a pending previous generation,
+  are persisted outside the CRDT namespace; a node that restarts mid-rotation
+  stays frozen and asks its peers (a peer past its generation means commit, one
+  behind means roll back, every member also in doubt means roll back).
+- **Limits.** A node that never registered and never announced itself is
+  unknown to the protocol. A partitioned minority cannot compact. There is no
+  automatic retry of a failed round; `-compact-every` simply tries again at the
+  next interval, and only the lowest replica ID acts. The single-node watermark
+  (`crdtstore.Watermark`) remains as a library gate; the cluster protocol does
+  not use it.
+
+Operate it with `REDGEO.COMPACT [partition|ALL]`, `REDGEO.MEMBERS` and
+`REDGEO.FORGET <replica>`.
 
 ### 12.3 `HSCAN`/`SSCAN`/`ZSCAN` are paginated but O(n) per page *(resolved)*
 Collection scans use the same per-node resume table as keyspace `SCAN` (§6.9):
