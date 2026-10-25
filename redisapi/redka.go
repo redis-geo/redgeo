@@ -1,6 +1,7 @@
 package redis
 
 import (
+	"errors"
 	"time"
 
 	"github.com/redis-geo/redgeo/core"
@@ -125,7 +126,35 @@ type RStream interface {
 	Trim(key string, t restypes.StreamTrim) (int, error)
 	// LastID is the highest ID ever added (0-0 if none), as `$` in XREAD.
 	LastID(key string) (restypes.StreamID, error)
+
+	// Consumer groups. Delivery state is merged across replicas without
+	// coordination, so delivery is at-least-once: two regions can hand the same
+	// entry to different consumers (DESIGN §12.3b).
+	GroupCreate(key, group string, id restypes.StreamID, mkstream bool) error
+	GroupDestroy(key, group string) (bool, error)
+	GroupSetID(key, group string, id restypes.StreamID) error
+	ConsumerCreate(key, group, consumer string) (bool, error)
+	ConsumerDelete(key, group, consumer string) (pending int, err error)
+	// Groups / Group describe consumer groups (ErrNoGroup if absent).
+	Groups(key string) ([]restypes.GroupInfo, error)
+	Group(key, group string) (restypes.GroupInfo, error)
+	// ReadNew delivers up to count (<=0: all) entries after the group's
+	// last-delivered ID to consumer, recording them as pending unless noack.
+	ReadNew(key, group, consumer string, count int, noack bool) ([]restypes.StreamEntry, error)
+	// ReadPending re-reads consumer's own pending entries with ID > after. An
+	// entry deleted from the stream comes back with nil Fields.
+	ReadPending(key, group, consumer string, after restypes.StreamID, count int) ([]restypes.StreamEntry, error)
+	Ack(key, group string, ids ...restypes.StreamID) (int, error)
+	// Claim moves pending entries to consumer. Entries deleted from the stream
+	// are dropped from the pending list and returned in deleted.
+	Claim(key, group, consumer string, ids []restypes.StreamID, o restypes.ClaimOpts) (claimed []restypes.StreamEntry, deleted []restypes.StreamID, err error)
 }
+
+// ErrNoGroup / ErrGroupExists are the consumer-group error sentinels.
+var (
+	ErrNoGroup     = errors.New("NOGROUP No such key or consumer group")
+	ErrGroupExists = errors.New("BUSYGROUP Consumer Group name already exists")
+)
 
 // RJSON is the JSON document storage interface. A document is loaded into a
 // jsondoc.Doc, mutated by fn, and the difference is persisted.

@@ -289,6 +289,20 @@ func Parse(args [][]byte) (redis.Cmd, error) {
 		return stream.ParseXTrim(b)
 	case "xread":
 		return stream.ParseXRead(b)
+	case "xgroup":
+		return stream.ParseXGroup(b)
+	case "xreadgroup":
+		return stream.ParseXReadGroup(b)
+	case "xack":
+		return stream.ParseXAck(b)
+	case "xpending":
+		return stream.ParseXPending(b)
+	case "xclaim":
+		return stream.ParseXClaim(b)
+	case "xautoclaim":
+		return stream.ParseXAutoClaim(b)
+	case "xinfo":
+		return stream.ParseXInfo(b)
 
 	// sorted set
 	case "zadd":

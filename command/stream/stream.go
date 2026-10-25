@@ -59,12 +59,22 @@ func parseBound(s string, isEnd bool) (restypes.StreamBound, error) {
 func writeEntries(w redis.Writer, es []restypes.StreamEntry) {
 	w.WriteArray(len(es))
 	for _, e := range es {
-		w.WriteArray(2)
-		w.WriteBulkString(e.ID.String())
-		w.WriteArray(len(e.Fields))
-		for _, f := range e.Fields {
-			w.WriteBulk(f)
-		}
+		writeEntry(w, e)
+	}
+}
+
+// writeEntry writes [id, [field value ...]]. An entry with no fields was
+// deleted from the stream while still pending in a group: [id, nil].
+func writeEntry(w redis.Writer, e restypes.StreamEntry) {
+	w.WriteArray(2)
+	w.WriteBulkString(e.ID.String())
+	if e.Fields == nil {
+		w.WriteNull()
+		return
+	}
+	w.WriteArray(len(e.Fields))
+	for _, f := range e.Fields {
+		w.WriteBulk(f)
 	}
 }
 

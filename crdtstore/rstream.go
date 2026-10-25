@@ -371,6 +371,9 @@ func (s *Store) deleteStream(ctx context.Context, db int, key string) error {
 			return err
 		}
 	}
+	if err := s.deleteGroups(ctx, db, key); err != nil {
+		return err
+	}
 	base := streamLastBase(db, key)
 	ks, err := s.query(ctx, base, true)
 	if err != nil {
@@ -401,6 +404,9 @@ func (s *Store) copyStream(ctx context.Context, db int, key, newKey string) erro
 		return err
 	}
 	if err := s.streamBumpLast(ctx, db, newKey, last); err != nil {
+		return err
+	}
+	if err := s.copyGroups(ctx, db, key, newKey); err != nil {
 		return err
 	}
 	return s.writeMeta(ctx, db, newKey, metaEnvelope{KeyMeta: KeyMeta{Type: core.TypeStream}})

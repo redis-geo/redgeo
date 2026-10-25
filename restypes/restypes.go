@@ -102,6 +102,41 @@ type StreamAddOpts struct {
 	Trim       *StreamTrim
 }
 
+// ---- stream consumer groups ----
+
+// PendingEntry is one delivered-but-unacknowledged entry of a consumer group.
+type PendingEntry struct {
+	ID          StreamID
+	Consumer    string
+	DeliveredMS int64 // unix ms of the last delivery
+	Count       int   // times delivered
+}
+
+// ConsumerInfo describes a consumer of a group.
+type ConsumerInfo struct {
+	Name    string
+	Pending int
+	SeenMS  int64 // unix ms of its last activity
+}
+
+// GroupInfo describes a consumer group.
+type GroupInfo struct {
+	Name      string
+	LastID    StreamID // last-delivered ID
+	Consumers []ConsumerInfo
+	Pending   []PendingEntry // ascending by ID
+}
+
+// ClaimOpts carries the options of XCLAIM / XAUTOCLAIM.
+type ClaimOpts struct {
+	MinIdleMS  int64
+	IdleMS     int64 // XCLAIM IDLE: set the entry's idle time
+	TimeMS     int64 // XCLAIM TIME: set the delivery time (unix ms); 0 = unset
+	RetryCount int   // XCLAIM RETRYCOUNT; -1 = unset
+	Force      bool
+	JustID     bool // do not increment the delivery count
+}
+
 // ---- hashes ----
 
 // HashItem is a single field/value pair of a hash.

@@ -23,7 +23,7 @@ implementation.
 
 ### Non-goals (initially)
 - Strong consistency, linearizability, or `WATCH`/CAS optimistic locking.
-- Redis Cluster slot protocol, stream consumer groups. (redka
+- Redis Cluster slot protocol. (redka
   doesn't have these either.) HyperLogLog, bitmaps and geo were added later:
   HLL as per-replica max-merged sketches, bitmaps as per-chunk LWW slots (a
   concurrent flip inside the same 512-byte chunk can be lost), geo as a zset of
@@ -479,7 +479,7 @@ stats (heads, max height, queued jobs via `InternalStats`).
 | **1 — conflict-free correct** | Converges with intuitive HLC-LWW / OR-Set / counter semantics | strings, hashes, sets, counters (dedicated), keys/scan, server |
 | **2 — converges, weaker semantics** | Eventually consistent; some ops race | zsets, lists, TTL, NX/XX existence checks |
 | **3 — best-effort / degraded** | No isolation/rollback/CAS | MULTI/EXEC, `*STORE` |
-| **out** | Not implemented | WATCH, stream consumer groups, RediSearch/TimeSeries/Bloom, cluster |
+| **out** | Not implemented | WATCH, RediSearch/TimeSeries/Bloom, cluster |
 
 Estimated: **~60–70%** of common string/hash/set/key surface with *correct*
 active/active semantics; **~15%** more with documented weaker semantics.
@@ -739,8 +739,21 @@ so concurrent `XADD`s never write the same key. Deviations and costs:
   entries (as in Redis) and IDs never go backwards.
 - `XLEN`/`XRANGE`/`XREAD` scan the whole stream (O(n)); `~` trimming is exact.
 - `XREAD BLOCK` polls the store (20 ms) and caps `BLOCK 0` at one minute.
-- Consumer groups (`XGROUP`, `XREADGROUP`, `XACK`, `XPENDING`, `XCLAIM`) are not
-  implemented: delivery/ack state is not conflict-free.
+- **Consumer groups** (`XGROUP CREATE/DESTROY/SETID/CREATECONSUMER/DELCONSUMER`,
+  `XREADGROUP`, `XACK`, `XPENDING`, `XCLAIM`, `XAUTOCLAIM`, `XINFO`) keep all
+  state as per-replica slots under `/xg/{group}/`: existence, pending entries
+  and consumers are HLC-LWW slots (`XACK`/`DESTROY` write deleted-tagged slots);
+  the last-delivered ID is a max-merged `(epoch, id)` register, where
+  `XGROUP SETID` bumps the epoch so the group can move backwards. **Delivery is
+  at-least-once across replicas**: two regions that read `>` from the same
+  last-delivered ID before they sync both hand out the same entries, and the later
+  delivery wins the pending record. Within one node the key lock makes delivery
+  exactly-once. `XACK` and pending state converge; consumers on different nodes
+  should therefore be idempotent, or all readers of a group should use one
+  region. Not tracked: `ENTRIESREAD`/lag, `XINFO STREAM FULL`, `XSETID`, and the
+  `LASTID` option of `XCLAIM` (accepted, ignored). `XAUTOCLAIM` scans the whole
+  pending list rather than bounding attempts.
+- A stream with groups is renamed with them; `DEL` removes them.
 
 ### 12.3c Lua scripting
 `EVAL`/`EVALSHA`/`EVAL_RO`/`SCRIPT LOAD|EXISTS|FLUSH` run scripts in a sandboxed

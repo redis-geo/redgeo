@@ -139,6 +139,34 @@ const replicaRegPrefix = "/00/r/"
 
 func replicaRegKey(replica string) ds.Key { return ds.NewKey(replicaRegPrefix + encSeg(replica)) }
 
+// Stream consumer-group state, all under /{P}/d/{db}/{key}/xg/{group}/:
+//
+//	m/{replica}                 group existence (LWW slot)
+//	l/{replica}                 last-delivered (epoch, id), max-merged
+//	p/{ms}-{seq}/{replica}      pending entry (LWW slot)
+//	c/{consumer}/{replica}      consumer (LWW slot)
+func groupsBase(db int, key string) string {
+	return fmt.Sprintf("%s/d/%d/%s/xg/", part(db, key), db, encSeg(key))
+}
+
+func groupBase(db int, key, group string) string { return groupsBase(db, key) + encSeg(group) + "/" }
+
+func groupMetaSlot(db int, key, group, replica string) ds.Key {
+	return ds.NewKey(groupBase(db, key, group) + "m/" + encSeg(replica))
+}
+
+func groupLastSlot(db int, key, group, replica string) ds.Key {
+	return ds.NewKey(groupBase(db, key, group) + "l/" + encSeg(replica))
+}
+
+func groupPelSlot(db int, key, group string, ms, seq uint64, replica string) ds.Key {
+	return ds.NewKey(fmt.Sprintf("%sp/%016x-%016x/%s", groupBase(db, key, group), ms, seq, encSeg(replica)))
+}
+
+func groupConsumerSlot(db int, key, group, consumer, replica string) ds.Key {
+	return ds.NewKey(groupBase(db, key, group) + "c/" + encSeg(consumer) + "/" + encSeg(replica))
+}
+
 // hashBase / hashFieldBase / hashSlot hold per-field, per-replica LWW slots:
 // /{P}/d/{db}/{key}/h/{field}/{replicaID}
 func hashBase(db int, key string) string {
