@@ -50,6 +50,21 @@ func TestHyperLogLog(t *testing.T) {
 	if r := cl.do(t, "PFCOUNT", "set"); r.Kind != '-' {
 		t.Fatalf("PFCOUNT on set = %+v", r)
 	}
+	// The sketch is a Redis-format string: GET/STRLEN see it, SET can restore it.
+	blob := cl.do(t, "GET", "hll")
+	if len(blob.Str) != 12304 || blob.Str[:5] != "HYLL\x00" {
+		t.Fatalf("GET hll = %d bytes", len(blob.Str))
+	}
+	if r := cl.do(t, "STRLEN", "hll"); r.Str != "12304" {
+		t.Fatalf("STRLEN = %+v", r)
+	}
+	cl.do(t, "SET", "copy", blob.Str)
+	if r := cl.do(t, "PFCOUNT", "copy"); r.Str != "3" {
+		t.Fatalf("restored PFCOUNT = %+v", r)
+	}
+	if r := cl.do(t, "TYPE", "copy"); r.Str != "string" {
+		t.Fatalf("restored TYPE = %+v", r)
+	}
 	// Larger cardinality.
 	for i := 0; i < 1000; i++ {
 		cl.do(t, "PFADD", "big", fmt.Sprint("e", i))

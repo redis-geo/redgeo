@@ -170,10 +170,8 @@ func (r strRepo) bitKind(ctx context.Context, key string) (bitmapKind, int64, er
 	switch {
 	case m.Flavor == flavorBitmap:
 		return bitIsBitmap, m.ETimeMS, nil
-	case m.Flavor == flavorHLL:
-		return bitAbsent, 0, core.ErrKeyType
 	}
-	return bitIsString, m.ETimeMS, nil
+	return bitIsString, m.ETimeMS, nil // includes counters and HLLs: readable as bytes
 }
 
 // SetBit sets one bit and returns its previous value. A plain string is

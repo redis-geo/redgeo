@@ -725,6 +725,22 @@ whole collection, so cost per page is O(n) in the collection size — the reply 
 bounded, the work is not. Cursors resolve only on the issuing node; an unknown
 or expired cursor restarts from the beginning.
 
+### 12.3a HyperLogLog and the Redis HLL format
+`PFADD/PFCOUNT/PFMERGE` use Redis' own hash (MurmurHash64A, seed `0xadc83b19`),
+register layout and Ertl estimator, so an element lands in the same register as
+in Redis. Internally each replica stores its own sketch (a compact sparse/dense
+form) and reads max-merge them, which is what makes concurrent `PFADD`s
+converge. At the string interface the key is a Redis HLL: `GET` returns the
+merged sketch as a dense `HYLL` string (12304 bytes, cached cardinality marked
+invalid so Redis recomputes it), `STRLEN`/`GETBIT`/`BITCOUNT` read it, and `SET`
+of a well-formed `HYLL` string — dense or sparse — stores an HLL, so a sketch
+moves between redgeo and Redis with `GET`/`SET` (or any tool that copies string
+values) and keeps working with `PF*`. `SET` of anything else overwrites an HLL,
+as in Redis; `SETBIT` on one is refused. Differences: a restored value is merged
+into this replica's component, so overwriting a sketch cluster-wide races like
+any other `SET`/`DEL` (§6.1); `DEBUG`/`PFDEBUG`/`PFSELFTEST` are not implemented;
+sketches written by the pre-0.1 build used a different hash and must be rebuilt.
+
 ### 12.3b Streams: IDs, existence, cost
 Streams (`XADD/XLEN/XRANGE/XREVRANGE/XREAD/XDEL/XTRIM`) store each entry as a
 per-replica HLC-LWW slot keyed by ID (`/d/{db}/{key}/x/{ms}-{seq}/{replica}`),

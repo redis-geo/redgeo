@@ -41,7 +41,11 @@ func (r strRepo) readValue(ctx context.Context, key string) (core.Value, error) 
 	}
 	switch m.Flavor {
 	case flavorHLL:
-		return nil, core.ErrKeyType // sketches are only reachable via PF* commands
+		merged, _, _, err := r.s.hllLoad(ctx, r.db, key)
+		if err != nil {
+			return nil, err
+		}
+		return core.Value(merged.encodeRedis()), nil
 	case flavorBitmap:
 		d, err := r.s.bitmapLoad(ctx, r.db, key)
 		if err != nil {
@@ -124,7 +128,10 @@ func (r strRepo) writeString(ctx context.Context, key string, b []byte, etimeMS 
 		case m.Flavor.isCounter():
 			live, _ = r.s.counterExists(ctx, r.db, key)
 		case m.Flavor == flavorHLL:
-			live, _ = r.s.anyPrefix(ctx, hllBase(r.db, key))
+			// SET overwrites an HLL (as in Redis, where it is just a string).
+			if err := r.s.deleteHLL(ctx, r.db, key); err != nil {
+				return err
+			}
 		case m.Flavor == flavorBitmap:
 			// SET overwrites a bitmap: tombstone its chunks (HLC-fenced).
 			if err := r.s.deleteBitmap(ctx, r.db, key); err != nil {
@@ -139,6 +146,11 @@ func (r strRepo) writeString(ctx context.Context, key string, b []byte, etimeMS 
 		if m, _, ok, err := r.s.readMeta(ctx, r.db, key); err == nil && ok {
 			etimeMS = m.ETimeMS
 		}
+	}
+	// A value that is a well-formed Redis HLL string becomes an HLL, so a
+	// sketch restored with SET (or DUMP/RESTORE tooling) works with PF*.
+	if sk, ok := decodeRedis(b); ok {
+		return r.s.hllStore(ctx, r.db, key, sk, etimeMS)
 	}
 	if err := r.s.writeSlot(ctx, strSlot(r.db, key, r.s.replica()), tagPresent, b); err != nil {
 		return err

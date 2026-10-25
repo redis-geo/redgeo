@@ -47,7 +47,11 @@ func TestBitmapCommands(t *testing.T) {
 		t.Fatalf("SETBIT on set = %+v", r)
 	}
 	cl.do(t, "PFADD", "h", "a")
-	if r := cl.do(t, "GETBIT", "h", "1"); r.Kind != '-' {
+	// An HLL is a string: bit reads work, bit writes would corrupt it and are refused.
+	if r := cl.do(t, "GETBIT", "h", "1"); r.Kind != ':' {
 		t.Fatalf("GETBIT on HLL = %+v", r)
+	}
+	if r := cl.do(t, "SETBIT", "h", "1", "1"); r.Kind != '-' {
+		t.Fatalf("SETBIT on HLL = %+v", r)
 	}
 }

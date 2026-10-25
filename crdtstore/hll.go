@@ -2,7 +2,7 @@ package crdtstore
 
 import (
 	"context"
-	"hash/fnv"
+	"encoding/binary"
 	"math"
 	"math/bits"
 	"strings"
@@ -15,8 +15,8 @@ import (
 // PN-counter (§6.4), each replica writes ONLY its own sketch at
 // /d/{db}/{key}/p/{replicaID}; a read merges every replica's sketch, so
 // concurrent PFADDs on different replicas converge with no coordination.
-// The key is TypeString/flavorHLL (Redis reports HLLs as strings) and, like
-// counters, does not mix with plain strings (§6.4).
+// The key is TypeString/flavorHLL. Like Redis, GET returns the sketch as a
+// "HYLL" string and SET of a valid one stores an HLL (hllfmt.go).
 
 const (
 	hllP    = 14
@@ -28,18 +28,30 @@ const (
 
 type hllSketch [hllM]uint8
 
-// hllHash is deterministic across nodes/architectures (hash/maphash is not):
-// FNV-1a 64 followed by a splitmix64 finalizer for avalanche.
+// hllHash is Redis' MurmurHash64A with seed 0xadc83b19, so an element lands in
+// the same register here as in Redis and sketches interoperate (hllfmt.go).
 func hllHash(b []byte) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write(b)
-	x := h.Sum64()
-	x ^= x >> 30
-	x *= 0xbf58476d1ce4e5b9
-	x ^= x >> 27
-	x *= 0x94d049bb133111eb
-	x ^= x >> 31
-	return x
+	const m = 0xc6a4a7935bd1e995
+	const r = 47
+	h := uint64(0xadc83b19) ^ (uint64(len(b)) * m)
+	for ; len(b) >= 8; b = b[8:] {
+		k := binary.LittleEndian.Uint64(b)
+		k *= m
+		k ^= k >> r
+		k *= m
+		h ^= k
+		h *= m
+	}
+	if n := len(b); n > 0 {
+		for i := n - 1; i >= 0; i-- {
+			h ^= uint64(b[i]) << (8 * uint(i))
+		}
+		h *= m
+	}
+	h ^= h >> r
+	h *= m
+	h ^= h >> r
+	return h
 }
 
 // add folds one element in and reports whether a register increased.
