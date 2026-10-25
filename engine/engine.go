@@ -10,6 +10,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -72,7 +73,17 @@ type partition struct {
 	idx    int
 	nsBase string // e.g. "/redgeo/p07"
 	gen    int
-	bcast  crdt.Broadcaster
+	sb     *switchBcast
+	view   *bview // the active generation's broadcaster view
+	gate   *gate
+
+	// Rotation state (rotation.go). staged is a prepared next generation;
+	// prevGen/oldDS describe the generation kept until a rotation commits.
+	staged  *stagedGen
+	hasPrev bool
+	prevGen int
+	oldDS   *crdt.Datastore
+	oldView *bview
 }
 
 // Engine is the storage substrate handed to the crdtstore backend.
@@ -86,6 +97,8 @@ type Engine struct {
 
 	dagSvc ipld.DAGService
 	opts   *crdt.Options
+
+	cancel context.CancelFunc // stops the broadcaster pumps
 }
 
 // noopBroadcaster never sends and blocks on receive (single node, no peers).
@@ -131,7 +144,9 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		opts.RebroadcastInterval = cfg.RebroadcastInterval
 	}
 
+	pumpCtx, cancel := context.WithCancel(context.Background())
 	e := &Engine{
+		cancel:   cancel,
 		numParts: numParts,
 		backing:  backing,
 		replica:  cfg.ReplicaID,
@@ -159,8 +174,12 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		if numParts > 1 {
 			nsBase = fmt.Sprintf("%s/p%02x", Namespace.String(), i)
 		}
-		p := &partition{idx: i, nsBase: nsBase, gen: 0, bcast: bcastFor(i)}
-		store, err := crdt.New(backing, p.namespace(), dagSvc, p.bcast, opts)
+		p := &partition{idx: i, nsBase: nsBase, gate: newGate()}
+		p.sb = newSwitchBcast(pumpCtx, bcastFor(i))
+		p.view = p.sb.newView()
+		p.sb.setCurrent(p.view)
+		e.restoreGen(ctx, p) // a rotated partition resumes its latest generation
+		store, err := crdt.New(backing, p.namespace(), dagSvc, p.view, opts)
 		if err != nil {
 			_ = e.Close()
 			return nil, fmt.Errorf("engine: crdt.New (partition %d): %w", i, err)
@@ -227,6 +246,15 @@ func parseLeadingBucket(key string) int {
 	return 0
 }
 
+// readable waits out a rotation's read-block window, then returns active().
+func (p *partition) readable(ctx context.Context) (*crdt.Datastore, func(), error) {
+	if err := p.gate.waitReadable(ctx); err != nil {
+		return nil, nil, err
+	}
+	c, done := p.active()
+	return c, done, nil
+}
+
 // active returns a partition's datastore under a read lock held for the call's
 // duration via the returned release func.
 func (p *partition) active() (*crdt.Datastore, func()) {
@@ -236,28 +264,46 @@ func (p *partition) active() (*crdt.Datastore, func()) {
 
 // Get reads the value at key, or ds.ErrNotFound.
 func (e *Engine) Get(ctx context.Context, key ds.Key) ([]byte, error) {
-	c, done := e.partForKey(key.String()).active()
+	c, done, err := e.partForKey(key.String()).readable(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer done()
 	return c.Get(ctx, key)
 }
 
 // Has reports whether key exists.
 func (e *Engine) Has(ctx context.Context, key ds.Key) (bool, error) {
-	c, done := e.partForKey(key.String()).active()
+	c, done, err := e.partForKey(key.String()).readable(ctx)
+	if err != nil {
+		return false, err
+	}
 	defer done()
 	return c.Has(ctx, key)
 }
 
 // Put writes value at key (a blind CRDT add).
 func (e *Engine) Put(ctx context.Context, key ds.Key, value []byte) error {
-	c, done := e.partForKey(key.String()).active()
+	p := e.partForKey(key.String())
+	endWrite, err := p.gate.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer endWrite()
+	c, done := p.active()
 	defer done()
 	return c.Put(ctx, key, value)
 }
 
 // Delete tombstones key.
 func (e *Engine) Delete(ctx context.Context, key ds.Key) error {
-	c, done := e.partForKey(key.String()).active()
+	p := e.partForKey(key.String())
+	endWrite, err := p.gate.beginWrite(ctx)
+	if err != nil {
+		return err
+	}
+	defer endWrite()
+	c, done := p.active()
 	defer done()
 	return c.Delete(ctx, key)
 }
@@ -265,7 +311,10 @@ func (e *Engine) Delete(ctx context.Context, key ds.Key) error {
 // QueryPrefix returns all results whose key has the given prefix. Every redgeo
 // prefix begins with a concrete /{P}/ segment, so it routes to one partition.
 func (e *Engine) QueryPrefix(ctx context.Context, prefix string, keysOnly bool) ([]query.Entry, error) {
-	c, done := e.partForKey(prefix).active()
+	c, done, err := e.partForKey(prefix).readable(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer done()
 	res, err := c.Query(ctx, query.Query{Prefix: prefix, KeysOnly: keysOnly})
 	if err != nil {
@@ -287,7 +336,7 @@ func (e *Engine) QueryPrefix(ctx context.Context, prefix string, keysOnly bool) 
 // partitions is NOT atomic across them (the documented cross-partition MULTI
 // trade-off, §5.5).
 func (e *Engine) Batch(ctx context.Context) (ds.Batch, error) {
-	return &multiBatch{e: e, subs: map[int]ds.Batch{}}, nil
+	return &multiBatch{e: e, subs: map[int]*subBatch{}}, nil
 }
 
 // Sync flushes the named prefix's partition to the backing store.
@@ -320,90 +369,6 @@ type Stats struct {
 	QueuedJobs int
 }
 
-// RotatePartition performs global-purge compaction of one partition by DAG
-// rotation (DESIGN §5.5): snapshot the partition's live state, seed a fresh
-// genesis namespace with only that state, swap it in, and purge the old
-// namespace from the backing. Returns the live entry count carried forward.
-//
-// Single-node correct; in a cluster, partitions must be rotated in coordination
-// (gated on the causal-stability watermark) or an un-rotated peer would
-// resurrect tombstoned keys.
-func (e *Engine) RotatePartition(ctx context.Context, idx int) (int, error) {
-	p := e.parts[idx]
-
-	p.mu.RLock()
-	cur := p.crdt
-	oldNS := p.namespace().String()
-	p.mu.RUnlock()
-
-	// Snapshot live state of this partition.
-	res, err := cur.Query(ctx, query.Query{})
-	if err != nil {
-		return 0, err
-	}
-	type kv struct {
-		k string
-		v []byte
-	}
-	var live []kv
-	for r := range res.Next() {
-		if r.Error != nil {
-			res.Close()
-			return 0, r.Error
-		}
-		live = append(live, kv{r.Key, r.Value})
-	}
-	res.Close()
-
-	// Build the fresh-generation datastore and reseed.
-	p.mu.Lock()
-	newGen := p.gen + 1
-	newNSBase := p.nsBase
-	p.mu.Unlock()
-	newNS := ds.NewKey(fmt.Sprintf("%s/g%d", newNSBase, newGen))
-	newCRDT, err := crdt.New(e.backing, newNS, e.dagSvc, p.bcast, e.opts)
-	if err != nil {
-		return 0, fmt.Errorf("engine: rotate partition %d: %w", idx, err)
-	}
-	batch, err := newCRDT.Batch(ctx)
-	if err != nil {
-		return 0, err
-	}
-	for _, kv := range live {
-		if err := batch.Put(ctx, ds.NewKey(kv.k), kv.v); err != nil {
-			return 0, err
-		}
-	}
-	if err := batch.Commit(ctx); err != nil {
-		return 0, err
-	}
-
-	// Swap.
-	p.mu.Lock()
-	old := p.crdt
-	p.crdt = newCRDT
-	p.gen = newGen
-	p.mu.Unlock()
-
-	// Drop the old DAG: close it and purge its namespace from the backing.
-	_ = old.Close()
-	_ = e.purgeNamespace(ctx, oldNS)
-	return len(live), nil
-}
-
-// Rotate compacts every partition (a full global purge).
-func (e *Engine) Rotate(ctx context.Context) (int, error) {
-	total := 0
-	for i := range e.parts {
-		n, err := e.RotatePartition(ctx, i)
-		if err != nil {
-			return total, err
-		}
-		total += n
-	}
-	return total, nil
-}
-
 // purgeNamespace deletes every backing key under an old DAG namespace.
 func (e *Engine) purgeNamespace(ctx context.Context, ns string) error {
 	res, err := e.backing.Query(ctx, query.Query{Prefix: ns, KeysOnly: true})
@@ -422,6 +387,9 @@ func (e *Engine) purgeNamespace(ctx context.Context, ns string) error {
 
 // Close shuts down all partition datastores and the backing store.
 func (e *Engine) Close() error {
+	if e.cancel != nil {
+		e.cancel()
+	}
 	var err error
 	for _, p := range e.parts {
 		if p == nil || p.crdt == nil {
@@ -430,6 +398,12 @@ func (e *Engine) Close() error {
 		p.mu.Lock()
 		if cerr := p.crdt.Close(); cerr != nil && err == nil {
 			err = cerr
+		}
+		if p.staged != nil {
+			_ = p.staged.crdt.Close()
+		}
+		if p.oldDS != nil {
+			_ = p.oldDS.Close()
 		}
 		p.mu.Unlock()
 	}
@@ -441,25 +415,39 @@ func (e *Engine) Close() error {
 	return err
 }
 
-// multiBatch fans Put/Delete out to per-partition sub-batches.
+// multiBatch fans Put/Delete out to per-partition sub-batches. Staging mutates
+// nothing; Commit admits through the partition's gate and fails with
+// ErrGenerationChanged if the partition rotated since the sub-batch was opened
+// (its ops would otherwise land in a retired generation).
 type multiBatch struct {
 	e    *Engine
-	subs map[int]ds.Batch
+	subs map[int]*subBatch
+}
+
+// ErrGenerationChanged is returned by a batch commit that spans a rotation.
+var ErrGenerationChanged = errors.New("TRYAGAIN partition rotated during transaction, retry")
+
+type subBatch struct {
+	b ds.Batch
+	c *crdt.Datastore
 }
 
 func (b *multiBatch) sub(ctx context.Context, key string) (ds.Batch, error) {
 	idx := b.e.partIdx(key)
 	if sb, ok := b.subs[idx]; ok {
-		return sb, nil
+		return sb.b, nil
 	}
-	c, done := b.e.parts[idx].active()
-	sb, err := c.Batch(ctx)
+	c, done, err := b.e.parts[idx].readable(ctx)
+	if err != nil {
+		return nil, err
+	}
+	nb, err := c.Batch(ctx)
 	done()
 	if err != nil {
 		return nil, err
 	}
-	b.subs[idx] = sb
-	return sb, nil
+	b.subs[idx] = &subBatch{b: nb, c: c}
+	return nb, nil
 }
 
 func (b *multiBatch) Put(ctx context.Context, key ds.Key, value []byte) error {
@@ -479,8 +467,22 @@ func (b *multiBatch) Delete(ctx context.Context, key ds.Key) error {
 }
 
 func (b *multiBatch) Commit(ctx context.Context) error {
-	for _, sb := range b.subs {
-		if err := sb.Commit(ctx); err != nil {
+	for idx, sb := range b.subs {
+		p := b.e.parts[idx]
+		endWrite, err := p.gate.beginWrite(ctx)
+		if err != nil {
+			return err
+		}
+		p.mu.RLock()
+		same := p.crdt == sb.c
+		p.mu.RUnlock()
+		if !same {
+			endWrite()
+			return ErrGenerationChanged
+		}
+		err = sb.b.Commit(ctx)
+		endWrite()
+		if err != nil {
 			return err
 		}
 	}
